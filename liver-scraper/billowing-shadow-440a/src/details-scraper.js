@@ -1903,15 +1903,73 @@ async function integrateDataForApp(env, detailedLivers) {
     console.log(`   With details: ${integratedResult.integration.withDetails} items`);
     console.log(`   Pending: ${integratedResult.integration.pending} items`);
 
-    console.log('💾 Attempting to write latest_integrated_data to KV...');
-    await env.LIVER_DATA?.put('latest_integrated_data', JSON.stringify(integratedResult));
-    console.log('✅ KV write successful: latest_integrated_data saved');
+    // Hybrid Solution (B + A): 複数保護キー戦略 + KV整合性待機機構
+    console.log('💾 Implementing multi-key protection strategy for KV consistency...');
 
-    // KV同期問題対策：複数のキーに書き込む
-    console.log('💾 Writing backup keys for KV synchronization...');
-    await env.LIVER_DATA?.put('latest_integrated_backup', JSON.stringify(integratedResult));
-    await env.LIVER_DATA?.put('latest_data', JSON.stringify(integratedResult)); // Main Workerが読み取れるようstructured formatで更新
-    console.log('✅ Backup keys written successfully');
+    // Phase 1: 複数保護キー書き込み（即効性）
+    const timestamp = Date.now();
+    const protectionKeys = [
+      'latest_integrated_data_primary',
+      'latest_integrated_data_secondary',
+      'latest_integrated_data_tertiary',
+      'latest_integrated_data', // 既存キー（互換性）
+      'latest_integrated_backup' // 既存バックアップキー（互換性）
+    ];
+
+    console.log(`📝 Writing ${protectionKeys.length} protection keys with timestamp: ${timestamp}`);
+
+    // 並列書き込みでKV同期問題を軽減
+    const writePromises = protectionKeys.map(async (key, index) => {
+      try {
+        await env.LIVER_DATA?.put(key, JSON.stringify(integratedResult));
+        console.log(`✅ Protection key written: ${key} (${index + 1}/${protectionKeys.length})`);
+        return { key, status: 'success' };
+      } catch (error) {
+        console.error(`❌ Failed to write protection key: ${key}`, error);
+        return { key, status: 'failed', error: error.message };
+      }
+    });
+
+    const writeResults = await Promise.all(writePromises);
+    const successCount = writeResults.filter(r => r.status === 'success').length;
+    console.log(`📊 Protection keys written: ${successCount}/${protectionKeys.length} successful`);
+
+    // Main Worker API用データ更新
+    await env.LIVER_DATA?.put('latest_data', JSON.stringify(integratedResult));
+    console.log('✅ Main API data updated with structured format');
+
+    // Phase 2: KV整合性待機機構（信頼性向上）
+    console.log('⏳ Implementing KV consistency wait mechanism...');
+
+    // 30秒待機してKV同期を確実にする
+    console.log('⏳ Waiting 30 seconds for KV synchronization across Cloudflare edge network...');
+    await sleep(30000);
+
+    // 書き込み確認テスト：いずれかのキーが読み取れることを確認
+    console.log('🔍 Verifying KV write consistency...');
+    let verificationSuccess = false;
+
+    for (const key of protectionKeys) {
+      try {
+        const testRead = await env.LIVER_DATA?.get(key);
+        if (testRead) {
+          console.log(`✅ Verification successful: ${key} is readable`);
+          verificationSuccess = true;
+          break;
+        }
+      } catch (error) {
+        console.warn(`⚠️ Verification failed for ${key}:`, error.message);
+      }
+    }
+
+    if (verificationSuccess) {
+      console.log('✅ KV consistency verification passed - data protection active');
+    } else {
+      console.error('❌ KV consistency verification failed - protection may not be reliable');
+      // 追加の10秒待機
+      console.log('⏳ Additional 10-second wait for edge propagation...');
+      await sleep(10000);
+    }
 
     // ロック解除
     await env.LIVER_DATA?.delete(lockKey);
