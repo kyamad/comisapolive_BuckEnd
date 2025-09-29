@@ -268,6 +268,141 @@ async function reScrapeLiverProfile(originalId, env) {
   }
 }
 
+// Emergency Data Recovery & Unified Key Strategy
+const DEPLOYMENT_VERSION = Date.now();
+const DATA_KEYS = {
+  CURRENT: 'liver_data_current',
+  BACKUP: 'liver_data_backup',
+  METADATA: 'liver_data_metadata'
+};
+
+async function emergencyDataRecovery(env) {
+  console.log('🆘 EMERGENCY DATA RECOVERY INITIATED');
+
+  try {
+    // Step 1: Locate current valid data
+    const basicDataStr = await env.LIVER_DATA.get('latest_basic_data');
+    if (basicDataStr) {
+      const basicData = JSON.parse(basicDataStr);
+      console.log(`📊 Found basic data: ${basicData.data.length} items`);
+
+      // Step 2: Restore to unified keys
+      await writeUnifiedData(env, basicData.data);
+
+      // Step 3: Clear conflicting keys
+      await env.LIVER_DATA.delete('latest_data');
+
+      console.log('✅ Emergency recovery completed');
+      return { success: true, count: basicData.data.length };
+    }
+
+    console.log('⚠️ No recovery data found');
+    return { success: false, error: 'No recovery data available' };
+  } catch (error) {
+    console.error('❌ Emergency recovery failed:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function writeUnifiedData(env, data) {
+  console.log('💾 Writing unified data structure...');
+
+  const metadata = {
+    timestamp: Date.now(),
+    version: DEPLOYMENT_VERSION,
+    count: data.length,
+    hasDetailsCount: data.filter(item => item.hasDetails).length,
+    dataSource: 'unified_key_strategy'
+  };
+
+  const unifiedData = {
+    timestamp: metadata.timestamp,
+    total: data.length,
+    data: data,
+    lastUpdate: new Date().toISOString(),
+    dataSource: 'unified_key_strategy'
+  };
+
+  // Atomic write operation
+  await Promise.all([
+    env.LIVER_DATA.put(DATA_KEYS.CURRENT, JSON.stringify(unifiedData)),
+    env.LIVER_DATA.put(DATA_KEYS.BACKUP, JSON.stringify(unifiedData)),
+    env.LIVER_DATA.put(DATA_KEYS.METADATA, JSON.stringify(metadata))
+  ]);
+
+  console.log(`✅ Unified data written: ${data.length} items, ${metadata.hasDetailsCount} with details`);
+}
+
+async function readUnifiedData(env) {
+  console.log('📖 Reading from unified data structure...');
+
+  try {
+    // Try primary key first
+    let dataStr = await env.LIVER_DATA.get(DATA_KEYS.CURRENT);
+
+    if (!dataStr) {
+      console.log('⚠️ Primary data not found, trying backup...');
+      dataStr = await env.LIVER_DATA.get(DATA_KEYS.BACKUP);
+    }
+
+    if (dataStr) {
+      const data = JSON.parse(dataStr);
+      console.log(`✅ Unified data read: ${data.total} items`);
+      return data;
+    }
+
+    console.log('❌ No unified data found, attempting legacy key fallback...');
+
+    // Legacy key fallback for immediate API functionality
+    const legacyKeys = [
+      'latest_integrated_data_primary',
+      'latest_integrated_data_secondary',
+      'latest_integrated_data_tertiary',
+      'latest_integrated_data',
+      'latest_integrated_backup',
+      'latest_detailed_data',
+      'latest_basic_data'
+    ];
+
+    for (const key of legacyKeys) {
+      try {
+        const legacyStr = await env.LIVER_DATA.get(key);
+        if (legacyStr) {
+          const legacyData = JSON.parse(legacyStr);
+          console.log(`✅ Fallback data found from ${key}: ${legacyData.data?.length || legacyData.total || 'unknown'} items`);
+
+          // Convert legacy format to unified format if needed
+          if (legacyData.data && Array.isArray(legacyData.data)) {
+            return {
+              data: legacyData.data,
+              total: legacyData.total || legacyData.data.length,
+              timestamp: legacyData.timestamp || Date.now(),
+              stats: {
+                withDetails: legacyData.data.filter(item => item.hasDetails).length,
+                pending: 0
+              }
+            };
+          }
+        }
+      } catch (error) {
+        console.log(`⚠️ Failed to read legacy key ${key}:`, error.message);
+      }
+    }
+
+    console.log('❌ No legacy data found either, attempting emergency recovery...');
+    const recovery = await emergencyDataRecovery(env);
+
+    if (recovery.success) {
+      return await readUnifiedData(env);
+    }
+
+    return null;
+  } catch (error) {
+    console.error('❌ Failed to read unified data:', error);
+    return null;
+  }
+}
+
 export default {
   async scheduled(event, env, ctx) {
     console.log('Starting scheduled liver data scraping...');
@@ -279,31 +414,16 @@ export default {
 
       console.log('🔄 Integrating with existing details in scheduled execution...');
 
+      console.log(`🚀 EMERGENCY_UNIFIED_KEY_SOLUTION_V${DEPLOYMENT_VERSION}`);
+
       // 統合保護機能を使用して詳細データを保護
       const integratedResult = await integrateWithExistingDetails(env, basicLiverData);
       const allLiverData = integratedResult.data;
-      
-      // 前回データと比較
-      const lastDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
-      const lastData = lastDataStr ? JSON.parse(lastDataStr) : null;
-      
-      // 変更があった場合のみ保存
-      const currentHash = generateHash(JSON.stringify(allLiverData) + Date.now()); 
-      const lastHash = lastData ? generateHash(JSON.stringify(lastData.data)) : null;
-      
-      if (currentHash !== lastHash) {
-        if (env.LIVER_DATA) {
-          await env.LIVER_DATA.put('latest_data', JSON.stringify({
-          timestamp: Date.now(),
-          total: allLiverData.length,
-          data: allLiverData,
-          lastUpdate: new Date().toISOString()
-        }));
-        console.log(`✅ Updated data: ${allLiverData.length} livers with detailed info`);
-        }
-      } else {
-        console.log('ℹ️ No changes detected, skipping update');
-      }
+
+      // 統一キー戦略で保存
+      await writeUnifiedData(env, allLiverData);
+
+      console.log(`✅ Unified data updated: ${allLiverData.length} livers with detailed info`);
       
     } catch (error) {
       console.error('❌ Scraping failed:', error);
@@ -335,6 +455,34 @@ export default {
     // 🔧 修正: より詳細なテスト用エンドポイント
     if (url.pathname === '/test') {
       return await testSingleLiverWithGender(env);
+    }
+
+    // Emergency Data Recovery Endpoint
+    if (url.pathname === '/emergency-recovery') {
+      try {
+        console.log('🆘 Emergency recovery endpoint triggered');
+        const result = await emergencyDataRecovery(env);
+
+        return new Response(JSON.stringify({
+          success: result.success,
+          message: result.success ?
+            `Emergency recovery completed: ${result.count} items restored` :
+            `Recovery failed: ${result.error}`,
+          recoveredCount: result.count || 0,
+          timestamp: new Date().toISOString()
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          timestamp: new Date().toISOString()
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
     }
 
     if (url.pathname === '/manual-scrape') {
@@ -3849,60 +3997,53 @@ export default {
       }
     }
 
-    // ライバー一覧API
+    // ライバー一覧API - 手動スクレイピングと完全に同じロジックを使用
     if (url.pathname === '/api/livers') {
       try {
-        const data = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
-        
-        if (!data) {
-          return new Response(JSON.stringify({
-            data: [], 
-            total: 0, 
-            error: "No data found in storage",
-            suggestion: "Run /full-scrape to collect data"
-          }), {
-            headers: { 
-              'Content-Type': 'application/json',
-              'Cache-Control': 'max-age=300',
-              ...corsHeaders
-            }
-          });
-        }
-        
-        // JSONパースを安全に実行
-        let parsedData;
-        try {
-          parsedData = JSON.parse(data);
-        } catch (parseError) {
-          return new Response(JSON.stringify({
-            data: [], 
-            total: 0, 
-            error: "Data parsing failed",
-            rawDataPreview: data.substring(0, 200)
-          }), {
-            headers: { 
-              'Content-Type': 'application/json',
-              ...corsHeaders
-            }
-          });
-        }
-        
-        return new Response(JSON.stringify(parsedData), {
-          headers: { 
+        console.log(`🚀 API_MANUAL_SCRAPE_MIRROR_V${DEPLOYMENT_VERSION}`);
+
+        // 手動スクレイピングと完全に同じ処理を実行
+        const { scrapeBasicDataOnly, integrateWithExistingDetails, generateHash } = await import('./main-scraper.js');
+        const basicLiverData = await scrapeBasicDataOnly(env);
+
+        console.log('🔄 Integrating with existing details in API endpoint...');
+
+        // 統合保護機能を使用して詳細データを保護（手動スクレイピングと同じ）
+        const integratedResult = await integrateWithExistingDetails(env, basicLiverData);
+        const allLiverData = integratedResult.data;
+
+        const response = {
+          data: allLiverData,
+          total: allLiverData.length,
+          timestamp: new Date().toISOString(),
+          stats: {
+            withDetails: allLiverData.filter(item => item.hasDetails).length,
+            pending: 0
+          },
+          message: "Manual scraping completed",
+          totalLivers: allLiverData.length,
+          updated: false,
+          sampleLiver: allLiverData.length > 0 ? allLiverData[0] : null,
+          allData: allLiverData
+        };
+
+        return new Response(JSON.stringify(response), {
+          headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'max-age=3600',
+            'Cache-Control': 'max-age=300',
             ...corsHeaders
           }
         });
-        
+
       } catch (error) {
+        console.error('❌ API error:', error);
         return new Response(JSON.stringify({
-          data: [], 
-          total: 0, 
+          data: [],
+          total: 0,
           error: error.message
         }), {
           status: 500,
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             ...corsHeaders
           }
