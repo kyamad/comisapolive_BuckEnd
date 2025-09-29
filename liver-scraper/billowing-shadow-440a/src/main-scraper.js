@@ -884,43 +884,78 @@ async function integrateWithExistingDetails(env, basicLiverData) {
     console.log('🔄 Integrating with existing details...');
     console.log(`📊 Basic data count: ${basicLiverData.length}`);
 
-    // Solution A: APIと同じ優先順位で詳細データを検索
-    // 優先順位: integrated > integrated_backup > detailed > latest_data
+    // Hybrid Solution (B + A): マルチキー検出機能 + KV整合性リトライ機構
+    console.log('🔍 Implementing multi-key detection with KV consistency retry...');
+
+    // Phase 1: 複数保護キー検索（即効性）
+    const protectionKeys = [
+      'latest_integrated_data_primary',
+      'latest_integrated_data_secondary',
+      'latest_integrated_data_tertiary',
+      'latest_integrated_data', // 既存キー（互換性）
+      'latest_integrated_backup', // 既存バックアップキー（互換性）
+      'latest_detailed_data', // レガシー互換性
+      'latest_data' // API用データ（フォールバック）
+    ];
+
     let existingDataStr = null;
     let dataSource = 'none';
+    let retryCount = 0;
+    const maxRetries = 3;
 
-    // 1. latest_integrated_data から検索
-    existingDataStr = await env.LIVER_DATA?.get('latest_integrated_data');
+    console.log(`📋 Checking ${protectionKeys.length} protection keys with retry mechanism...`);
+
+    // Phase 2: KV整合性リトライ機構（信頼性向上）
+    while (!existingDataStr && retryCount < maxRetries) {
+      console.log(`🔄 Key search attempt ${retryCount + 1}/${maxRetries}`);
+
+      // 全ての保護キーを並列で検索
+      const searchPromises = protectionKeys.map(async (key) => {
+        try {
+          const data = await env.LIVER_DATA?.get(key);
+          if (data) {
+            console.log(`✅ Found data in protection key: ${key}`);
+            return { key, data, status: 'success' };
+          }
+          return { key, data: null, status: 'empty' };
+        } catch (error) {
+          console.warn(`⚠️ Failed to read protection key: ${key}`, error.message);
+          return { key, data: null, status: 'error', error: error.message };
+        }
+      });
+
+      const searchResults = await Promise.all(searchPromises);
+
+      // 最初に見つかった有効なデータを使用
+      const foundResult = searchResults.find(result => result.data);
+
+      if (foundResult) {
+        existingDataStr = foundResult.data;
+        dataSource = foundResult.key;
+        console.log(`✅ Successfully found detailed data in: ${dataSource}`);
+        break;
+      }
+
+      // 全てのキーの検索結果をログ出力
+      console.log('📊 Key search results:');
+      searchResults.forEach(result => {
+        console.log(`   ${result.key}: ${result.status}`);
+      });
+
+      retryCount++;
+
+      if (retryCount < maxRetries) {
+        console.log(`⏳ Waiting 10 seconds before retry ${retryCount + 1}/${maxRetries} for KV consistency...`);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
+    }
+
+    // 結果サマリー
     if (existingDataStr) {
-      dataSource = 'latest_integrated_data';
-      console.log('✅ Found detailed data in latest_integrated_data');
-    }
-
-    // 2. latest_integrated_backup から検索
-    if (!existingDataStr) {
-      existingDataStr = await env.LIVER_DATA?.get('latest_integrated_backup');
-      if (existingDataStr) {
-        dataSource = 'latest_integrated_backup';
-        console.log('✅ Found detailed data in latest_integrated_backup');
-      }
-    }
-
-    // 3. latest_detailed_data から検索
-    if (!existingDataStr) {
-      existingDataStr = await env.LIVER_DATA?.get('latest_detailed_data');
-      if (existingDataStr) {
-        dataSource = 'latest_detailed_data';
-        console.log('✅ Found detailed data in latest_detailed_data');
-      }
-    }
-
-    // 4. latest_data から検索（従来の方法）
-    if (!existingDataStr) {
-      existingDataStr = await env.LIVER_DATA?.get('latest_data');
-      if (existingDataStr) {
-        dataSource = 'latest_data';
-        console.log('✅ Found detailed data in latest_data');
-      }
+      console.log(`✅ Multi-key detection successful: Found data in ${dataSource} after ${retryCount + 1} attempts`);
+    } else {
+      console.log(`❌ Multi-key detection failed: No protection keys found after ${maxRetries} attempts`);
+      console.log(`🔍 Searched keys: ${protectionKeys.join(', ')}`);
     }
 
     if (!existingDataStr) {
