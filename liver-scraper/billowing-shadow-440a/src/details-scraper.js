@@ -4,6 +4,11 @@
 
 export default {
   async scheduled(event, env, ctx) {
+    console.log('🚀 EMERGENCY_V8_CACHE_CLEAR_V3.0_' + Date.now());
+    console.log('=== ULTIMATE FORCE CACHE INVALIDATION ===');
+    console.log('🔥 V8_ISOLATE_EMERGENCY_RESTART_REQUIRED');
+    console.log('🚀 HYBRID_SOLUTION_V2.1_DEPLOYED_' + Date.now());
+    console.log('=== FORCE CACHE CLEAR DEPLOYMENT ===');
     console.log('🔍 Starting details scraper (Worker2) - Scheduled execution...');
     
     try {
@@ -32,15 +37,18 @@ export default {
   },
 
   async fetch(request, env) {
+    console.log('🚀 EMERGENCY_V8_CACHE_CLEAR_V3.0_' + Date.now());
+    console.log('🔥 FETCH_HANDLER_CACHE_BREAK_' + Math.random());
+
     const url = new URL(request.url);
-    
+
     // CORS設定
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
-    
+
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
