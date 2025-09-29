@@ -1,0 +1,29 @@
+name = "liver-scraper-images"
+main = "src/images-scraper.js"
+compatibility_date = "2024-01-01"
+account_id = "4cf5abc5b44aacd9b0776ac001d9826a"
+
+# Worker3: 画像収集専門 - 詳細完了の1-2時間後
+[triggers]
+crons = ["0 2,8,14,20 * * *"]
+
+# 共有KVとR2バインディング
+[[kv_namespaces]]
+binding = "LIVER_DATA"
+id = "4adf452d17b14628a67d1bbe183d6b53"
+
+[[kv_namespaces]]
+binding = "IMAGE_HASHES"
+id = "315e8927f3284e969d9657c0e97bbab8"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "liver-images"
+
+# 環境変数
+[vars]
+WORKER_AUTH_TOKEN = "liver-scraper-secure-token-2024"
+
+# シークレット環境変数（wrangler secret putで設定）
+# LOGIN_EMAIL = "your-email@example.com"
+# LOGIN_PASSWORD = "your-password"

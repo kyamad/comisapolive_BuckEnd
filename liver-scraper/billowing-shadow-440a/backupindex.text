@@ -1,0 +1,4067 @@
+export default {
+  async scheduled(event, env, ctx) {
+    console.log('Starting scheduled liver data scraping...');
+    
+    try {
+      // 全ページから詳細情報を取得
+      const allLiverData = await scrapeAllPagesWithAuthentication(env);
+      
+      // 前回データと比較
+      const lastDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+      const lastData = lastDataStr ? JSON.parse(lastDataStr) : null;
+      
+      // 変更があった場合のみ保存
+      const currentHash = generateHash(JSON.stringify(allLiverData) + Date.now()); 
+      const lastHash = lastData ? generateHash(JSON.stringify(lastData.data)) : null;
+      
+      if (currentHash !== lastHash) {
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify({
+          timestamp: Date.now(),
+          total: allLiverData.length,
+          data: allLiverData,
+          lastUpdate: new Date().toISOString()
+        }));
+        console.log(`✅ Updated data: ${allLiverData.length} livers with detailed info`);
+        }
+      } else {
+        console.log('ℹ️ No changes detected, skipping update');
+      }
+      
+    } catch (error) {
+      console.error('❌ Scraping failed:', error);
+      // エラー情報も保存
+      if (env.LIVER_DATA) {
+        await env.LIVER_DATA.put('last_error', JSON.stringify({
+        timestamp: Date.now(),
+        error: error.message,
+        stack: error.stack
+      }));
+      }
+    }
+  },
+
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    
+    // CORS設定
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+    
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+    
+    // 🔧 修正: より詳細なテスト用エンドポイント
+    if (url.pathname === '/test') {
+      return await testSingleLiverWithGender(env);
+    }
+
+    if (url.pathname === '/manual-scrape') {
+      try {
+        console.log('🚀 Manual scraping triggered...');
+        
+        // scheduled処理と同じロジックを実行
+        const allLiverData = await scrapeAllPagesWithAuthentication(env);
+        
+        // 前回データと比較
+        const lastDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        const lastData = lastDataStr ? JSON.parse(lastDataStr) : null;
+        
+        // 変更があった場合のみ保存
+        const currentHash = generateHash(JSON.stringify(allLiverData));
+        const lastHash = lastData ? generateHash(JSON.stringify(lastData.data)) : null;
+        
+        let updated = false;
+        console.log(`🔍 Detailed env debug:`);
+        console.log(`- env type: ${typeof env}`);
+        console.log(`- env keys: ${Object.keys(env)}`);
+        console.log(`- LIVER_DATA exists: ${!!env.LIVER_DATA}`);
+        console.log(`- LIVER_DATA type: ${typeof env.LIVER_DATA}`);
+        console.log(`- IMAGE_HASHES exists: ${!!env.IMAGE_HASHES}`);
+        console.log(`- IMAGES exists: ${!!env.IMAGES}`);
+
+        try {
+          console.log(`- LIVER_DATA.get test: attempting...`);
+          const testResult = await env.LIVER_DATA.get('non_existent_key');
+          console.log(`- LIVER_DATA.get test: success (result: ${testResult})`);
+        } catch (kvError) {
+          console.log(`- LIVER_DATA.get test: failed - ${kvError.message}`);
+        }
+        if (currentHash !== lastHash) {
+          if (env.LIVER_DATA) {
+            console.log(`💾 Attempting to save data...`);
+            await env.LIVER_DATA.put('latest_data', JSON.stringify({
+              timestamp: Date.now(),
+              total: allLiverData.length,
+              data: allLiverData,
+              lastUpdate: new Date().toISOString()
+            }));
+            updated = true;
+            console.log(`✅ Updated data: ${allLiverData.length} livers with detailed info`);
+          } else {
+            console.log(`❌ env.LIVER_DATA is undefined!`);  // ← 追加
+          }
+        } else {
+          console.log('ℹ️ No changes detected, skipping update');
+        }
+        console.log(`Final updated value: ${updated}`); 
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Manual scraping completed',
+          totalLivers: allLiverData.length,
+          updated: updated,
+          timestamp: new Date().toISOString(),
+          sampleLiver: allLiverData[0] || null,
+          allData: allLiverData
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Manual scraping failed:', error);
+        
+        // エラー情報も保存
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('last_error', JSON.stringify({
+            timestamp: Date.now(),
+            error: error.message,
+            stack: error.stack
+          }));
+        }
+        
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          timestamp: new Date().toISOString()
+        }, null, 2), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 🆕 スクレイピング進行状況をリアルタイム確認
+    if (url.pathname === '/scrape-status') {
+      try {
+        const latestData = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        const lastError = env.LIVER_DATA ? await env.LIVER_DATA.get('last_error') : null;
+        
+        let parsedData = null;
+        let parsedError = null;
+        
+        if (latestData) {
+          parsedData = JSON.parse(latestData);
+        }
+        
+        if (lastError) {
+          parsedError = JSON.parse(lastError);
+        }
+        
+        return new Response(JSON.stringify({
+          status: 'running',
+          hasData: !!parsedData,
+          totalLivers: parsedData ? parsedData.total : 0,
+          lastUpdate: parsedData ? parsedData.lastUpdate : null,
+          lastUpdateTimestamp: parsedData ? parsedData.timestamp : null,
+          hasError: !!parsedError,
+          lastError: parsedError,
+          sampleLivers: parsedData && parsedData.data ? 
+            parsedData.data.slice(0, 3).map(liver => ({
+              name: liver.name,
+              platform: liver.platform,
+              followers: liver.followers,
+              hasGender: !!(liver.profileInfo && liver.profileInfo.gender),
+              genderFound: liver.genderFound
+            })) : []
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          error: 'Failed to get status: ' + error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 🆕 新しいデバッグエンドポイント: ログイン状態確認
+    if (url.pathname === '/debug-login-only') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        return new Response(JSON.stringify({
+          loginSuccess: loginResult.success,
+          loginMethod: loginResult.method,
+          cookiesLength: loginResult.cookies.length,
+          cookiesPreview: loginResult.cookies.substring(0, 100),
+          error: loginResult.error
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 🆕 新しいデバッグエンドポイント: リスト解析のみ
+    if (url.pathname === '/debug-list-parsing') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          return new Response(JSON.stringify({ error: 'Login failed' }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        const listResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+        
+        const html = await listResponse.text();
+        
+        // より詳細な解析
+        const analysis = {
+          responseStatus: listResponse.status,
+          responseUrl: listResponse.url,
+          htmlLength: html.length,
+          // HTML構造の分析
+          structure: {
+            hasLiversItem: html.includes('livers_item'),
+            hasLiversList: html.includes('livers_list'),
+            hasModal: html.includes('modal'),
+            hasGuestGuide: html.includes('guest-guide'),
+            hasUserFiles: html.includes('user_files'),
+            totalImages: (html.match(/<img[^>]*>/g) || []).length,
+            totalLinks: (html.match(/<a[^>]*href/g) || []).length
+          },
+          // パターンマッチング結果
+          patterns: {
+            modalGuestGuideLinks: (html.match(/\/modal\/guest-guide\/\d+/g) || []).length,
+            liverDetailLinks: (html.match(/\/liver\/detail\/\d+/g) || []).length,
+            userFilesThumbnail: (html.match(/\/user_files_thumbnail\/\d+/g) || []).length,
+            liverNames: (html.match(/alt="[^"]*"/g) || []).slice(0, 5)
+          },
+          // HTMLサンプル
+          htmlSample: html.substring(0, 2000)
+        };
+        
+        return new Response(JSON.stringify(analysis, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/debug-html') {
+      try {
+        const listResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1');
+        const html = await listResponse.text();
+        
+        // HTMLの詳細分析
+        const analysis = {
+          htmlLength: html.length,
+          containsPatterns: {
+            detail: html.includes('detail'),
+            liver: html.includes('liver'),
+            id158: html.includes('158'),
+            id155: html.includes('155'),
+            href: html.includes('href='),
+            user_files: html.includes('user_files')
+          },
+          // 全てのhref属性を抽出（最初の20個）
+          allHrefs: Array.from(new Set(
+            (html.match(/href="[^"]*"/g) || [])
+              .map(h => h.replace(/href="([^"]*)"/, '$1'))
+              .slice(0, 20)
+          )),
+          // ID 158を含む部分を抽出
+          contains158Context: html.includes('158') ? 
+            html.split('158').slice(0, 2).map((part, i) => 
+              i === 0 ? part.slice(-150) + '***158***' : '***158***' + part.slice(0, 150)
+            ) : [],
+          // aタグのサンプル
+          sampleATags: (html.match(/<a[^>]*>/g) || []).slice(0, 10),
+          // 実際のライバー名を探す
+          liverNames: {
+            aoi: html.includes('蒼井つむぎ'),
+            shion: html.includes('しおん'),
+            himesaki: html.includes('姫咲')
+          },
+          // HTMLの構造分析
+          structure: {
+            hasImg: html.includes('<img'),
+            hasDiv: html.includes('<div'),
+            hasSpan: html.includes('<span'),
+            imgCount: (html.match(/<img[^>]*>/g) || []).length,
+            aTagCount: (html.match(/<a[^>]*>/g) || []).length
+          }
+        };
+        
+        return new Response(JSON.stringify(analysis, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/debug-html-auth') {
+      try {
+        console.log('🔐 Starting authenticated HTML debug...');
+        
+        // ログイン処理
+        const loginResult = await performRobustLogin(env);
+        
+        if (!loginResult.success) {
+          return new Response(JSON.stringify({ 
+            error: 'Login failed', 
+            loginError: loginResult.error 
+          }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        console.log('✅ Login successful for debug');
+        
+        // 認証付きで一覧ページを取得
+        const listResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+        
+        console.log('📄 List page response status:', listResponse.status);
+        
+        const html = await listResponse.text();
+        
+        const analysis = {
+          loginSuccess: loginResult.success,
+          responseStatus: listResponse.status,
+          responseUrl: listResponse.url,
+          htmlLength: html.length,
+          containsPatterns: {
+            detail: html.includes('detail'),
+            liver: html.includes('liver'),
+            id158: html.includes('158'),
+            user_files: html.includes('user_files'),
+            login: html.includes('ログイン')
+          },
+          // 詳細リンクパターンの検索
+          linkPatterns: {
+            liver_detail: (html.match(/liver\/detail/g) || []).length,
+            href_detail: (html.match(/href="[^"]*detail[^"]*"/g) || []).slice(0, 5),
+            any_158: (html.match(/158/g) || []).length
+          },
+          // HTMLの最初の部分を確認
+          htmlStart: html.substring(0, 1000),
+          // Cookieの確認
+          cookiesUsed: loginResult.cookies.length > 0
+        };
+        
+        return new Response(JSON.stringify(analysis, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ 
+          error: error.message,
+          stack: error.stack 
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/debug-html-detailed') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          return new Response(JSON.stringify({ error: 'Login failed' }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        const listResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+        
+        const html = await listResponse.text();
+        
+        // より詳細な分析
+        const analysis = {
+          // ID158周辺のコンテキスト
+          id158Contexts: html.split('158').slice(0, 3).map((part, i) => 
+            i === 0 ? part.slice(-200) + '***158***' : '***158***' + part.slice(0, 200)
+          ),
+          
+          // 全てのaタグ（href含む）
+          allATags: (html.match(/<a[^>]*href="[^"]*"[^>]*>/g) || []).slice(0, 15),
+          
+          // 蒼井つむぎ周辺のHTML
+          aoiContext: html.includes('蒼井つむぎ') ? 
+            html.split('蒼井つむぎ').slice(0, 2).map((part, i) => 
+              i === 0 ? part.slice(-300) + '***蒼井つむぎ***' : '***蒼井つむぎ***' + part.slice(0, 300)
+            ) : ['Not found'],
+          
+          // 可能性のあるリンクパターン
+          possibleLinkPatterns: {
+            profile: (html.match(/href="[^"]*profile[^"]*"/g) || []).slice(0, 5),
+            user: (html.match(/href="[^"]*user[^"]*"/g) || []).slice(0, 5),
+            show: (html.match(/href="[^"]*show[^"]*"/g) || []).slice(0, 5),
+            view: (html.match(/href="[^"]*view[^"]*"/g) || []).slice(0, 5),
+            id_pattern: (html.match(/href="[^"]*\/\d+[^"]*"/g) || []).slice(0, 10)
+          },
+          
+          // 実際のライバー情報の構造
+          liverStructure: {
+            hasUserFiles: html.includes('user_files'),
+            userFilesCount: (html.match(/user_files/g) || []).length,
+            imgTagsCount: (html.match(/<img[^>]*>/g) || []).length,
+            // user_files を含むimg タグ
+            userFilesImgs: (html.match(/<img[^>]*user_files[^>]*>/g) || []).slice(0, 5)
+          }
+        };
+        
+        return new Response(JSON.stringify(analysis, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/debug-detail-url') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          return new Response(JSON.stringify({ error: 'Login failed' }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        // 複数の詳細ページURLパターンを試行
+        const testUrls = [
+          'https://www.comisapolive.com/liver/detail/158/',
+          'https://www.comisapolive.com/liver/158/',
+          'https://www.comisapolive.com/profile/158/',
+          'https://www.comisapolive.com/user/158/',
+          'https://www.comisapolive.com/modal/guest-guide/158'
+        ];
+        
+        const results = {};
+        
+        for (const url of testUrls) {
+          try {
+            const response = await fetch(url, {
+              headers: {
+                'Cookie': loginResult.cookies,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://www.comisapolive.com/'
+              }
+            });
+            
+            const html = await response.text();
+            
+            results[url] = {
+              status: response.status,
+              url: response.url,
+              htmlLength: html.length,
+              requiresLogin: html.includes('ログイン') || response.url.includes('login'),
+              hasProfile: html.includes('liverProf_') || html.includes('profile'),
+              hasGender: html.includes('性別'),
+              htmlPreview: html.substring(0, 200)
+            };
+          } catch (error) {
+            results[url] = { error: error.message };
+          }
+        }
+        
+        return new Response(JSON.stringify(results, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/debug-cookies') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        
+        if (!loginResult.success) {
+          return new Response(JSON.stringify({ error: 'Login failed' }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        console.log('🍪 Cookies being used:', loginResult.cookies);
+        
+        // 詳細ページにアクセスしてレスポンスヘッダーを確認
+        const detailResponse = await fetch('https://www.comisapolive.com/liver/detail/158/', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.comisapolive.com/',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          }
+        });
+        
+        const cookieAnalysis = {
+          loginCookies: loginResult.cookies,
+          detailResponseStatus: detailResponse.status,
+          detailResponseUrl: detailResponse.url,
+          detailResponseHeaders: Object.fromEntries(detailResponse.headers.entries()),
+          cookieLength: loginResult.cookies.length,
+          cookiePreview: loginResult.cookies.substring(0, 200)
+        };
+        
+        return new Response(JSON.stringify(cookieAnalysis, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/debug-detail-content') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          return new Response(JSON.stringify({ error: 'Login failed' }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        const detailResponse = await fetch('https://www.comisapolive.com/liver/detail/158/', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.comisapolive.com/',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          }
+        });
+        
+        const html = await detailResponse.text();
+        
+        const analysis = {
+          status: detailResponse.status,
+          url: detailResponse.url,
+          htmlLength: html.length,
+          containsProfile: {
+            liverProf_tag: html.includes('liverProf_tag'),
+            liverProf_name: html.includes('liverProf_name'),
+            liverProf_prof: html.includes('liverProf_prof'),
+            gender_text: html.includes('性別'),
+            male_female: html.includes('男性') || html.includes('女性')
+          },
+          profileClasses: {
+            categories: (html.match(/liverProf_tag[^>]*>([^<]*)</g) || []).slice(0, 3),
+            names: (html.match(/liverProf_name[^>]*>([^<]*)</g) || []).slice(0, 3),
+            profiles: (html.match(/liverProf_prof[^>]*>([^<]*)</g) || []).slice(0, 3)
+          },
+          htmlPreview: html.substring(0, 1000)
+        };
+        
+        return new Response(JSON.stringify(analysis, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/batch-scrape') {
+      try {
+        const url_params = new URL(request.url);
+        const batchSize = parseInt(url_params.searchParams.get('batch') || '5');
+        const startIndex = parseInt(url_params.searchParams.get('start') || '0');
+        
+        console.log(`🚀 Batch scraping started (batch: ${batchSize}, start: ${startIndex})`);
+        
+        // ログイン処理
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        // 基本データを取得
+        const listResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+        
+        const html = await listResponse.text();
+        const pageData = await parseHTMLPageWithDetails(html, env, 1);
+        
+        console.log(`📊 Found ${pageData.length} livers, processing batch ${startIndex}-${startIndex + batchSize}`);
+        
+        // バッチ処理: 指定された範囲のみ詳細取得
+        const batchData = pageData.slice(startIndex, startIndex + batchSize);
+        const processedData = [];
+        
+        for (const liver of batchData) {
+          if (liver.detailUrl) {
+            console.log(`🔍 Processing: ${liver.name}`);
+            const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+            Object.assign(liver, detailInfo);
+            
+            if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+              console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+            }
+            
+            processedData.push(liver);
+            await sleep(500); // 負荷軽減
+          }
+        }
+        
+        // 既存データと結合して保存
+        let allData = processedData;
+        
+        // 既存データがあれば結合
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (existingDataStr) {
+          const existingData = JSON.parse(existingDataStr);
+          // 重複を除去して結合
+          const existingIds = new Set(existingData.data.map(l => l.originalId));
+          const newData = processedData.filter(l => !existingIds.has(l.originalId));
+          allData = [...existingData.data, ...newData];
+        }
+        
+        // 保存
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify({
+            timestamp: Date.now(),
+            total: allData.length,
+            data: allData,
+            lastUpdate: new Date().toISOString(),
+            batchInfo: {
+              lastBatch: `${startIndex}-${startIndex + batchSize}`,
+              totalLivers: pageData.length,
+              processed: allData.length
+            }
+          }));
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Batch processing completed',
+          batchProcessed: processedData.length,
+          totalStored: allData.length,
+          totalAvailable: pageData.length,
+          nextBatch: startIndex + batchSize < pageData.length ? startIndex + batchSize : null,
+          nextUrl: startIndex + batchSize < pageData.length ? 
+            `${request.url.split('?')[0]}?start=${startIndex + batchSize}&batch=${batchSize}` : null,
+          sampleData: processedData.slice(0, 2)
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Batch scraping failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 2. 自動バッチ処理エンドポイント
+    if (url.pathname === '/auto-batch') {
+      try {
+        // 現在の状況を確認
+        const statusResponse = await fetch(`${request.url.replace('/auto-batch', '/scrape-status')}`);
+        const status = await statusResponse.json();
+        
+        let startIndex = 0;
+        if (status.hasData && status.sampleLivers) {
+          // 既存データがある場合は続きから
+          startIndex = status.totalLivers || 0;
+        }
+        
+        // 最初のバッチを実行
+        const batchResponse = await fetch(`${request.url.replace('/auto-batch', '/batch-scrape')}?start=${startIndex}&batch=5`);
+        const batchResult = await batchResponse.json();
+        
+        return new Response(JSON.stringify({
+          message: 'Auto batch processing started',
+          firstBatch: batchResult,
+          instructions: {
+            continue: batchResult.nextUrl ? `curl "${batchResult.nextUrl}"` : null,
+            checkStatus: `curl "${request.url.replace('/auto-batch', '/scrape-status')}"`
+          }
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/full-scrape') {
+      try {
+        const url_params = new URL(request.url);
+        const maxPages = parseInt(url_params.searchParams.get('pages') || '50'); // 最大ページ数制限
+        const batchSize = parseInt(url_params.searchParams.get('batch') || '10'); // 1ページあたりのバッチサイズ
+        
+        console.log(`🚀 Full scraping started (max pages: ${maxPages}, batch size: ${batchSize})`);
+        
+        // ログイン処理
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        let allLivers = [];
+        let currentPage = 1;
+        let totalPagesDetected = null;
+        
+        // 全ページをスクレイピング
+        while (currentPage <= maxPages) {
+          console.log(`📄 Processing page ${currentPage}...`);
+          
+          const pageUrl = currentPage === 1 
+            ? 'https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1'
+            : `https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1&page=${currentPage}`;
+          
+          // ページを取得
+          const pageResponse = await fetch(pageUrl, {
+            headers: {
+              'Cookie': loginResult.cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+              'Referer': 'https://www.comisapolive.com/'
+            }
+          });
+          
+          if (!pageResponse.ok) {
+            console.log(`⚠️ Page ${currentPage} failed with status ${pageResponse.status}`);
+            break;
+          }
+          
+          const html = await pageResponse.text();
+          
+          // 最初のページで総ページ数を検出
+          if (totalPagesDetected === null) {
+            totalPagesDetected = getMaxPages(html);
+            console.log(`📊 Total pages detected: ${totalPagesDetected}`);
+          }
+          
+          // ページデータを解析
+          const pageData = await parseHTMLPageWithDetails(html, env, currentPage);
+          
+          if (pageData.length === 0) {
+            console.log(`📄 Page ${currentPage}: No data found, stopping`);
+            break;
+          }
+          
+          console.log(`📄 Page ${currentPage}: Found ${pageData.length} livers`);
+          
+          // バッチ処理で詳細情報を取得
+          let processedInPage = 0;
+          for (let i = 0; i < pageData.length; i += batchSize) {
+            const batch = pageData.slice(i, i + batchSize);
+            console.log(`🔄 Processing page ${currentPage}, batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(pageData.length/batchSize)}`);
+            
+            for (const liver of batch) {
+              if (liver.detailUrl) {
+                console.log(`🔍 Processing: ${liver.name} (Page ${currentPage})`);
+                const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+                Object.assign(liver, detailInfo);
+                
+                if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+                  console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+                }
+                
+                processedInPage++;
+                await sleep(300); // 負荷軽減
+              }
+            }
+            
+            // バッチ間の休憩
+            if (i + batchSize < pageData.length) {
+              await sleep(1000);
+            }
+          }
+          
+          allLivers = allLivers.concat(pageData);
+          console.log(`✅ Page ${currentPage} completed: ${processedInPage} livers processed (Total: ${allLivers.length})`);
+          
+          // 次のページへ
+          currentPage++;
+          
+          // ページ間の休憩
+          if (currentPage <= (totalPagesDetected || maxPages)) {
+            await sleep(2000);
+          }
+          
+          // 検出された総ページ数に達したら停止
+          if (totalPagesDetected && currentPage > totalPagesDetected) {
+            console.log(`📄 Reached detected max pages (${totalPagesDetected}), stopping`);
+            break;
+          }
+        }
+        
+        console.log(`🎉 Full scraping completed: ${allLivers.length} total livers from ${currentPage - 1} pages`);
+        
+        // KVに保存
+        const finalData = {
+          timestamp: Date.now(),
+          total: allLivers.length,
+          data: allLivers,
+          lastUpdate: new Date().toISOString(),
+          pagesProcessed: currentPage - 1,
+          totalPagesDetected: totalPagesDetected
+        };
+        
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify(finalData));
+          console.log(`💾 Saved ${allLivers.length} livers to KV storage`);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Full scraping completed',
+          totalProcessed: allLivers.length,
+          pagesProcessed: currentPage - 1,
+          totalPagesDetected: totalPagesDetected,
+          lastUpdate: finalData.lastUpdate,
+          sampleData: allLivers.slice(0, 3),
+          genderStats: {
+            withGender: allLivers.filter(l => l.genderSearchResults?.bestMatch).length,
+            total: allLivers.length
+          }
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Full scraping failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          stack: error.stack
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // デバッグ用：ページ数確認エンドポイント
+    if (url.pathname === '/check-pages') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        const firstPageResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+        
+        const html = await firstPageResponse.text();
+        const maxPages = getMaxPages(html);
+        const firstPageLivers = await parseHTMLPageWithDetails(html, env, 1);
+        
+        // ページネーション情報を詳細に分析
+        const paginationInfo = {
+          maxPagesDetected: maxPages,
+          firstPageLivers: firstPageLivers.length,
+          // ページネーションリンクを探す
+          pageLinks: (html.match(/[?&]page=(\d+)/g) || []).map(match => parseInt(match.split('=')[1])),
+          // "次へ"ボタンの有無
+          hasNextButton: html.includes('次へ') || html.includes('next') || html.includes('&gt;'),
+          // ページ番号の最大値
+          maxPageInLinks: Math.max(...((html.match(/[?&]page=(\d+)/g) || []).map(match => parseInt(match.split('=')[1])) || [1]))
+        };
+        
+        return new Response(JSON.stringify({
+          success: true,
+          paginationInfo: paginationInfo,
+          recommendation: {
+            estimatedTotalPages: maxPages,
+            estimatedTotalLivers: firstPageLivers.length * maxPages,
+            shouldUseFullScrape: maxPages > 1
+          }
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/analyze-pagination') {
+      try {
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        const firstPageResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+        
+        const html = await firstPageResponse.text();
+        
+        // より詳細なページネーション分析
+        const analysis = {
+          htmlLength: html.length,
+          
+          // 全てのページ関連のリンクを抽出
+          allPageLinks: (html.match(/href="[^"]*[?&]page=\d+[^"]*"/g) || [])
+            .map(link => link.match(/page=(\d+)/)?.[1])
+            .filter(Boolean)
+            .map(Number),
+          
+          // ページネーション関連のHTMLパターンを検索
+          paginationPatterns: {
+            hasPageClass: html.includes('page'),
+            hasPaginationClass: html.includes('pagination'),
+            hasNextLink: html.includes('次へ') || html.includes('next') || html.includes('&gt;'),
+            hasPrevLink: html.includes('前へ') || html.includes('prev') || html.includes('&lt;'),
+            pageParameterCount: (html.match(/[?&]page=/g) || []).length
+          },
+          
+          // 数字のパターンを検索（ページ番号の可能性）
+          numberPatterns: {
+            numbersInLinks: (html.match(/>\s*(\d+)\s*</g) || [])
+              .map(match => match.match(/(\d+)/)?.[1])
+              .filter(n => n && parseInt(n) > 1 && parseInt(n) < 100)
+              .slice(0, 10),
+            
+            // ページ関連の文字列を検索
+            pageStrings: html.match(/page[^>]*>.*?</gi)?.slice(0, 5) || []
+          },
+          
+          // フォーム要素の確認
+          forms: {
+            hasForm: html.includes('<form'),
+            hasPageInput: html.includes('name="page"') || html.includes('id="page"'),
+            hasSearchForm: html.includes('search=1')
+          },
+          
+          // HTMLの構造分析
+          structure: {
+            totalLinks: (html.match(/<a[^>]*href/g) || []).length,
+            hasFooter: html.includes('footer'),
+            hasNav: html.includes('nav'),
+            liverItemCount: (html.match(/livers_item/g) || []).length
+          }
+        };
+        
+        // 2ページ目が存在するかテスト
+        let page2Test = null;
+        try {
+          const page2Response = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1&page=2', {
+            headers: {
+              'Cookie': loginResult.cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+              'Referer': 'https://www.comisapolive.com/'
+            }
+          });
+          
+          const page2Html = await page2Response.text();
+          const page2Livers = await parseHTMLPageWithDetails(page2Html, env, 2);
+          
+          page2Test = {
+            status: page2Response.status,
+            url: page2Response.url,
+            htmlLength: page2Html.length,
+            liverCount: page2Livers.length,
+            differentFromPage1: page2Html !== html,
+            hasLivers: page2Livers.length > 0,
+            sampleLiverNames: page2Livers.slice(0, 3).map(l => l.name)
+          };
+        } catch (page2Error) {
+          page2Test = { error: page2Error.message };
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          analysis: analysis,
+          page2Test: page2Test,
+          recommendations: {
+            likelyHasMultiplePages: !!(page2Test?.hasLivers),
+            shouldTrySequentialPages: true,
+            maxPagesToTry: page2Test?.hasLivers ? 10 : 1
+          }
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 強化されたgetMaxPages関数
+    function getMaxPagesEnhanced(html) {
+      let maxPage = 1;
+      
+      // 方法1: 既存のページリンクパターン
+      const pagePattern = /[?&]page=(\d+)/g;
+      let match;
+      while ((match = pagePattern.exec(html)) !== null) {
+        const pageNum = parseInt(match[1]);
+        if (pageNum > maxPage && pageNum < 1000) { // 現実的な上限
+          maxPage = pageNum;
+        }
+      }
+      
+      // 方法2: ページネーション内の数字を検索
+      const paginationPattern = /<nav[^>]*>[\s\S]*?<\/nav>|<div[^>]*pagination[^>]*>[\s\S]*?<\/div>/gi;
+      let paginationMatch;
+      while ((paginationMatch = paginationPattern.exec(html)) !== null) {
+        const paginationHtml = paginationMatch[0];
+        const numbersInPagination = paginationHtml.match(/>\s*(\d+)\s*</g);
+        if (numbersInPagination) {
+          numbersInPagination.forEach(numMatch => {
+            const num = parseInt(numMatch.match(/(\d+)/)[1]);
+            if (num > maxPage && num < 100) {
+              maxPage = num;
+            }
+          });
+        }
+      }
+      
+      // 方法3: 「次へ」ボタンがある場合は最低2ページ以上
+      if (maxPage === 1 && (html.includes('次へ') || html.includes('next') || html.includes('&gt;'))) {
+        maxPage = 2; // 最低2ページはあると推定
+      }
+      
+      return maxPage;
+    }
+
+    if (url.pathname === '/force-multi-scrape') {
+      try {
+        const url_params = new URL(request.url);
+        const maxPages = parseInt(url_params.searchParams.get('pages') || '20');
+        const batchSize = parseInt(url_params.searchParams.get('batch') || '8');
+        
+        console.log(`🚀 Force multi-page scraping started (max pages: ${maxPages}, batch size: ${batchSize})`);
+        
+        // ログイン処理
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        let allLivers = [];
+        let currentPage = 1;
+        let consecutiveEmptyPages = 0;
+        
+        // 強制的に指定されたページ数まで試行
+        while (currentPage <= maxPages && consecutiveEmptyPages < 3) {
+          console.log(`📄 Force processing page ${currentPage}...`);
+          
+          const pageUrl = currentPage === 1 
+            ? 'https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1'
+            : `https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1&page=${currentPage}`;
+          
+          // ページを取得
+          const pageResponse = await fetch(pageUrl, {
+            headers: {
+              'Cookie': loginResult.cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+              'Referer': currentPage === 1 ? 'https://www.comisapolive.com/' : `https://www.comisapolive.com/liver/list/?page=${currentPage-1}`
+            }
+          });
+          
+          console.log(`📄 Page ${currentPage} response: ${pageResponse.status} -> ${pageResponse.url}`);
+          
+          if (!pageResponse.ok) {
+            console.log(`⚠️ Page ${currentPage} failed with status ${pageResponse.status}`);
+            consecutiveEmptyPages++;
+            currentPage++;
+            continue;
+          }
+          
+          const html = await pageResponse.text();
+          
+          // ページデータを解析
+          const pageData = await parseHTMLPageWithDetails(html, env, currentPage);
+          
+          if (pageData.length === 0) {
+            console.log(`📄 Page ${currentPage}: No data found`);
+            consecutiveEmptyPages++;
+            currentPage++;
+            continue;
+          }
+          
+          console.log(`📄 Page ${currentPage}: Found ${pageData.length} livers`);
+          consecutiveEmptyPages = 0; // リセット
+          
+          // バッチ処理で詳細情報を取得
+          let processedInPage = 0;
+          for (let i = 0; i < pageData.length; i += batchSize) {
+            const batch = pageData.slice(i, i + batchSize);
+            const batchNum = Math.floor(i/batchSize) + 1;
+            const totalBatches = Math.ceil(pageData.length/batchSize);
+            
+            console.log(`🔄 Processing page ${currentPage}, batch ${batchNum}/${totalBatches} (${batch.length} livers)`);
+            
+            for (const liver of batch) {
+              if (liver.detailUrl) {
+                console.log(`🔍 Processing: ${liver.name} (Page ${currentPage})`);
+                try {
+                  const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+                  Object.assign(liver, detailInfo);
+                  
+                  if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+                    console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+                  }
+                  
+                  processedInPage++;
+                } catch (detailError) {
+                  console.error(`❌ Failed to process ${liver.name}:`, detailError.message);
+                }
+                
+                await sleep(300); // 負荷軽減
+              }
+            }
+            
+            // バッチ間の休憩
+            if (i + batchSize < pageData.length) {
+              console.log(`⏳ Batch break (3 seconds)...`);
+              await sleep(3000);
+            }
+          }
+          
+          allLivers = allLivers.concat(pageData);
+          console.log(`✅ Page ${currentPage} completed: ${processedInPage} livers processed (Total so far: ${allLivers.length})`);
+          
+          // 次のページへ
+          currentPage++;
+          
+          // ページ間の休憩
+          if (currentPage <= maxPages) {
+            console.log(`⏳ Page break (5 seconds)...`);
+            await sleep(5000);
+          }
+        }
+        
+        const actualPagesProcessed = currentPage - 1;
+        console.log(`🎉 Force multi-page scraping completed: ${allLivers.length} total livers from ${actualPagesProcessed} pages`);
+        
+        // KVに保存
+        const finalData = {
+          timestamp: Date.now(),
+          total: allLivers.length,
+          data: allLivers,
+          lastUpdate: new Date().toISOString(),
+          pagesProcessed: actualPagesProcessed,
+          maxPagesAttempted: maxPages,
+          method: 'force_multi_page'
+        };
+        
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify(finalData));
+          console.log(`💾 Saved ${allLivers.length} livers to KV storage`);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Force multi-page scraping completed',
+          totalProcessed: allLivers.length,
+          pagesProcessed: actualPagesProcessed,
+          maxPagesAttempted: maxPages,
+          lastUpdate: finalData.lastUpdate,
+          sampleData: allLivers.slice(0, 3),
+          genderStats: {
+            withGender: allLivers.filter(l => l.genderSearchResults?.bestMatch).length,
+            total: allLivers.length
+          },
+          pageBreakdown: allLivers.reduce((acc, liver) => {
+            acc[`page_${liver.page}`] = (acc[`page_${liver.page}`] || 0) + 1;
+            return acc;
+          }, {})
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Force multi-page scraping failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          stack: error.stack
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/light-scrape') {
+      try {
+        const url_params = new URL(request.url);
+        const maxPages = parseInt(url_params.searchParams.get('pages') || '10');
+        const detailsPerPage = parseInt(url_params.searchParams.get('details') || '3'); // 詳細取得数を制限
+        
+        console.log(`🚀 Light scraping started (max pages: ${maxPages}, details per page: ${detailsPerPage})`);
+        
+        // ログイン処理
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        let allLivers = [];
+        let currentPage = 1;
+        let consecutiveEmptyPages = 0;
+        let totalSubrequests = 1; // ログインで1回使用済み
+        
+        // 軽量版: subrequest制限を考慮して処理
+        while (currentPage <= maxPages && consecutiveEmptyPages < 3 && totalSubrequests < 45) {
+          console.log(`📄 Light processing page ${currentPage}... (subrequests used: ${totalSubrequests})`);
+          
+          const pageUrl = currentPage === 1 
+            ? 'https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1'
+            : `https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1&page=${currentPage}`;
+          
+          // ページを取得
+          const pageResponse = await fetch(pageUrl, {
+            headers: {
+              'Cookie': loginResult.cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+              'Referer': currentPage === 1 ? 'https://www.comisapolive.com/' : `https://www.comisapolive.com/liver/list/?page=${currentPage-1}`
+            }
+          });
+          
+          totalSubrequests++; // ページ取得で1回
+          console.log(`📄 Page ${currentPage} response: ${pageResponse.status} (subrequests: ${totalSubrequests})`);
+          
+          if (!pageResponse.ok) {
+            console.log(`⚠️ Page ${currentPage} failed with status ${pageResponse.status}`);
+            consecutiveEmptyPages++;
+            currentPage++;
+            continue;
+          }
+          
+          const html = await pageResponse.text();
+          
+          // ページデータを解析（詳細取得なし）
+          const pageData = await parseHTMLPageWithDetails(html, env, currentPage);
+          
+          if (pageData.length === 0) {
+            console.log(`📄 Page ${currentPage}: No data found`);
+            consecutiveEmptyPages++;
+            currentPage++;
+            continue;
+          }
+          
+          console.log(`📄 Page ${currentPage}: Found ${pageData.length} livers`);
+          consecutiveEmptyPages = 0;
+          
+          // 🔧 制限付き詳細取得: ページあたり最大N人まで
+          let processedInPage = 0;
+          for (let i = 0; i < Math.min(pageData.length, detailsPerPage) && totalSubrequests < 45; i++) {
+            const liver = pageData[i];
+            
+            if (liver.detailUrl) {
+              console.log(`🔍 Processing: ${liver.name} (Page ${currentPage}) - subrequest ${totalSubrequests + 1}`);
+              
+              try {
+                const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+                totalSubrequests++; // 詳細ページ取得で1回
+                
+                Object.assign(liver, detailInfo);
+                
+                if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+                  console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+                }
+                
+                processedInPage++;
+                await sleep(200); // 短い休憩
+                
+              } catch (detailError) {
+                console.error(`❌ Failed to process ${liver.name}:`, detailError.message);
+                totalSubrequests++; // エラーでもカウント
+              }
+            }
+          }
+          
+          // 残りのライバーには基本情報のみ設定
+          for (let i = detailsPerPage; i < pageData.length; i++) {
+            const liver = pageData[i];
+            liver.detailStatus = 'basic_only'; // 詳細未取得マーク
+          }
+          
+          allLivers = allLivers.concat(pageData);
+          console.log(`✅ Page ${currentPage} completed: ${processedInPage}/${pageData.length} detailed, ${pageData.length} total (Running total: ${allLivers.length})`);
+          
+          currentPage++;
+          
+          // subrequest制限チェック
+          if (totalSubrequests >= 45) {
+            console.log(`⚠️ Approaching subrequest limit (${totalSubrequests}/50), stopping early`);
+            break;
+          }
+          
+          // 短い休憩
+          await sleep(1000);
+        }
+        
+        const actualPagesProcessed = currentPage - 1;
+        const detailedCount = allLivers.filter(l => !l.detailStatus).length;
+        
+        console.log(`🎉 Light scraping completed: ${allLivers.length} total livers (${detailedCount} with details) from ${actualPagesProcessed} pages`);
+        
+        // KVに保存
+        const finalData = {
+          timestamp: Date.now(),
+          total: allLivers.length,
+          data: allLivers,
+          lastUpdate: new Date().toISOString(),
+          pagesProcessed: actualPagesProcessed,
+          maxPagesAttempted: maxPages,
+          subrequestsUsed: totalSubrequests,
+          method: 'light_scraping',
+          stats: {
+            withDetails: detailedCount,
+            basicOnly: allLivers.length - detailedCount
+          }
+        };
+        
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify(finalData));
+          console.log(`💾 Saved ${allLivers.length} livers to KV storage`);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Light scraping completed',
+          totalProcessed: allLivers.length,
+          withDetails: detailedCount,
+          basicOnly: allLivers.length - detailedCount,
+          pagesProcessed: actualPagesProcessed,
+          subrequestsUsed: totalSubrequests,
+          lastUpdate: finalData.lastUpdate,
+          sampleData: allLivers.slice(0, 3),
+          pageBreakdown: allLivers.reduce((acc, liver) => {
+            const key = `page_${liver.page}`;
+            if (!acc[key]) acc[key] = { total: 0, detailed: 0 };
+            acc[key].total++;
+            if (!liver.detailStatus) acc[key].detailed++;
+            return acc;
+          }, {}),
+          recommendations: {
+            continueWith: totalSubrequests >= 45 ? 
+              `curl "${new URL(request.url).origin}/light-scrape?pages=${maxPages}&details=${detailsPerPage}"` : null,
+            increaseDetails: detailedCount < allLivers.length ? 
+              `curl "${new URL(request.url).origin}/detail-fill"` : null
+          }
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Light scraping failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          suggestion: "Try reducing pages or details parameters"
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 詳細情報補完エンドポイント
+    if (url.pathname === '/detail-fill') {
+      try {
+        console.log('🔧 Starting detail fill process...');
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found. Run /light-scrape first.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        const basicOnlyLivers = existingData.data.filter(l => l.detailStatus === 'basic_only');
+        
+        console.log(`📊 Found ${basicOnlyLivers.length} livers needing detail information`);
+        
+        if (basicOnlyLivers.length === 0) {
+          return new Response(JSON.stringify({
+            success: true,
+            message: 'All livers already have detail information',
+            totalLivers: existingData.data.length
+          }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        // ログイン
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        let processedCount = 0;
+        let subrequestCount = 1; // ログイン分
+        const maxDetails = Math.min(basicOnlyLivers.length, 40); // 安全な上限
+        
+        for (let i = 0; i < maxDetails && subrequestCount < 45; i++) {
+          const liver = basicOnlyLivers[i];
+          
+          console.log(`🔍 Filling details for: ${liver.name} (${i + 1}/${maxDetails})`);
+          
+          try {
+            const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+            subrequestCount++;
+            
+            // 既存データを更新
+            const liverIndex = existingData.data.findIndex(l => l.id === liver.id);
+            if (liverIndex !== -1) {
+              Object.assign(existingData.data[liverIndex], detailInfo);
+              delete existingData.data[liverIndex].detailStatus; // マークを削除
+              processedCount++;
+            }
+            
+            await sleep(300);
+            
+          } catch (error) {
+            console.error(`❌ Failed to fill details for ${liver.name}:`, error.message);
+            subrequestCount++;
+          }
+        }
+        
+        // 更新されたデータを保存
+        existingData.lastUpdate = new Date().toISOString();
+        existingData.timestamp = Date.now();
+        
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify(existingData));
+        }
+        
+        console.log(`✅ Detail fill completed: ${processedCount} livers updated`);
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Detail fill completed',
+          processedCount: processedCount,
+          remainingBasicOnly: basicOnlyLivers.length - processedCount,
+          subrequestsUsed: subrequestCount,
+          continueWith: processedCount < basicOnlyLivers.length ? 
+            `curl "${new URL(request.url).origin}/detail-fill"` : null
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Detail fill failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/minimal-scrape') {
+      try {
+        const url_params = new URL(request.url);
+        const maxPages = parseInt(url_params.searchParams.get('pages') || '5');
+        const detailsTotal = parseInt(url_params.searchParams.get('details') || '5'); // 全体で5人まで
+        
+        console.log(`🚀 Minimal scraping started (max pages: ${maxPages}, total details: ${detailsTotal})`);
+        
+        // ログイン処理
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        let allLivers = [];
+        let currentPage = 1;
+        let consecutiveEmptyPages = 0;
+        let totalSubrequests = 1; // ログインで1回使用済み
+        let detailsProcessed = 0;
+        
+        // 超軽量版: 最小限のsubrequest使用
+        while (currentPage <= maxPages && consecutiveEmptyPages < 2 && totalSubrequests < 20) {
+          console.log(`📄 Minimal processing page ${currentPage}... (subrequests used: ${totalSubrequests})`);
+          
+          const pageUrl = currentPage === 1 
+            ? 'https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1'
+            : `https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1&page=${currentPage}`;
+          
+          // ページを取得
+          const pageResponse = await fetch(pageUrl, {
+            headers: {
+              'Cookie': loginResult.cookies,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+              'Referer': currentPage === 1 ? 'https://www.comisapolive.com/' : `https://www.comisapolive.com/liver/list/?page=${currentPage-1}`
+            }
+          });
+          
+          totalSubrequests++; // ページ取得で1回
+          console.log(`📄 Page ${currentPage} response: ${pageResponse.status} (subrequests: ${totalSubrequests})`);
+          
+          if (!pageResponse.ok) {
+            console.log(`⚠️ Page ${currentPage} failed with status ${pageResponse.status}`);
+            consecutiveEmptyPages++;
+            currentPage++;
+            continue;
+          }
+          
+          const html = await pageResponse.text();
+          
+          // ページデータを解析（詳細取得なし）
+          const pageData = await parseHTMLPageWithDetails(html, env, currentPage);
+          
+          if (pageData.length === 0) {
+            console.log(`📄 Page ${currentPage}: No data found`);
+            consecutiveEmptyPages++;
+            currentPage++;
+            continue;
+          }
+          
+          console.log(`📄 Page ${currentPage}: Found ${pageData.length} livers`);
+          consecutiveEmptyPages = 0;
+          
+          // 全てのライバーを基本情報として追加
+          allLivers = allLivers.concat(pageData);
+          
+          currentPage++;
+          await sleep(500); // 短い休憩
+        }
+        
+        console.log(`📊 Basic data collection completed: ${allLivers.length} livers from ${currentPage - 1} pages`);
+        
+        // 🔧 詳細情報は最初のN人のみ取得（全体制限）
+        for (let i = 0; i < Math.min(allLivers.length, detailsTotal) && totalSubrequests < 45; i++) {
+          const liver = allLivers[i];
+          
+          if (liver.detailUrl) {
+            console.log(`🔍 Getting details for: ${liver.name} (${i + 1}/${detailsTotal}) - subrequest ${totalSubrequests + 1}`);
+            
+            try {
+              const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+              totalSubrequests++; // 詳細ページ取得で1回
+              
+              Object.assign(liver, detailInfo);
+              
+              if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+                console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+              }
+              
+              detailsProcessed++;
+              await sleep(300);
+              
+            } catch (detailError) {
+              console.error(`❌ Failed to get details for ${liver.name}:`, detailError.message);
+              totalSubrequests++; // エラーでもカウント
+            }
+          }
+        }
+        
+        // 詳細未取得のライバーにマーク
+        for (let i = detailsTotal; i < allLivers.length; i++) {
+          allLivers[i].detailStatus = 'pending';
+        }
+        
+        const actualPagesProcessed = currentPage - 1;
+        
+        console.log(`🎉 Minimal scraping completed: ${allLivers.length} livers (${detailsProcessed} with details) from ${actualPagesProcessed} pages`);
+        
+        // KVに保存
+        const finalData = {
+          timestamp: Date.now(),
+          total: allLivers.length,
+          data: allLivers,
+          lastUpdate: new Date().toISOString(),
+          pagesProcessed: actualPagesProcessed,
+          subrequestsUsed: totalSubrequests,
+          method: 'minimal_scraping',
+          stats: {
+            withDetails: detailsProcessed,
+            pending: allLivers.length - detailsProcessed
+          }
+        };
+        
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify(finalData));
+          console.log(`💾 Saved ${allLivers.length} livers to KV storage`);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Minimal scraping completed',
+          totalProcessed: allLivers.length,
+          withDetails: detailsProcessed,
+          pending: allLivers.length - detailsProcessed,
+          pagesProcessed: actualPagesProcessed,
+          subrequestsUsed: totalSubrequests,
+          lastUpdate: finalData.lastUpdate,
+          sampleData: allLivers.slice(0, 3),
+          pageBreakdown: allLivers.reduce((acc, liver) => {
+            acc[`page_${liver.page}`] = (acc[`page_${liver.page}`] || 0) + 1;
+            return acc;
+          }, {}),
+          nextSteps: {
+            getMoreDetails: allLivers.length > detailsProcessed ? 
+              `curl "${new URL(request.url).origin}/detail-batch"` : null,
+            checkData: `curl "${new URL(request.url).origin}/api/livers"`
+          }
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Minimal scraping failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          suggestion: "Try reducing pages to 1-3 or details to 1-3"
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 詳細情報を少しずつ取得するエンドポイント
+    if (url.pathname === '/detail-batch') {
+      try {
+        const batchSize = parseInt(new URL(request.url).searchParams.get('batch') || '5');
+        
+        console.log(`🔧 Starting detail batch process (batch size: ${batchSize})...`);
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found. Run /minimal-scrape first.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        const pendingLivers = existingData.data.filter(l => l.detailStatus === 'pending');
+        
+        console.log(`📊 Found ${pendingLivers.length} livers needing detail information`);
+        
+        if (pendingLivers.length === 0) {
+          return new Response(JSON.stringify({
+            success: true,
+            message: 'All livers already processed',
+            totalLivers: existingData.data.length,
+            allComplete: true
+          }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        // ログイン
+        const loginResult = await performRobustLogin(env);
+        if (!loginResult.success) {
+          throw new Error(`Login failed: ${loginResult.error}`);
+        }
+        
+        let processedCount = 0;
+        let subrequestCount = 1; // ログイン分
+        const processBatch = Math.min(pendingLivers.length, batchSize, 40); // 安全な上限
+        
+        for (let i = 0; i < processBatch && subrequestCount < 45; i++) {
+          const liver = pendingLivers[i];
+          
+          console.log(`🔍 Processing details for: ${liver.name} (${i + 1}/${processBatch})`);
+          
+          try {
+            const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+            subrequestCount++;
+            
+            // 既存データを更新
+            const liverIndex = existingData.data.findIndex(l => l.id === liver.id);
+            if (liverIndex !== -1) {
+              Object.assign(existingData.data[liverIndex], detailInfo);
+              delete existingData.data[liverIndex].detailStatus; // pendingマークを削除
+              processedCount++;
+            }
+            
+            if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+              console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+            }
+            
+            await sleep(500);
+            
+          } catch (error) {
+            console.error(`❌ Failed to process details for ${liver.name}:`, error.message);
+            subrequestCount++;
+          }
+        }
+        
+        // 統計を更新
+        const remainingPending = existingData.data.filter(l => l.detailStatus === 'pending').length;
+        existingData.stats = {
+          withDetails: existingData.data.filter(l => !l.detailStatus).length,
+          pending: remainingPending
+        };
+        
+        // 更新されたデータを保存
+        existingData.lastUpdate = new Date().toISOString();
+        existingData.timestamp = Date.now();
+        
+        if (env.LIVER_DATA) {
+          await env.LIVER_DATA.put('latest_data', JSON.stringify(existingData));
+        }
+        
+        console.log(`✅ Detail batch completed: ${processedCount} livers updated`);
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Detail batch completed',
+          processedThisBatch: processedCount,
+          remainingPending: remainingPending,
+          subrequestsUsed: subrequestCount,
+          allComplete: remainingPending === 0,
+          continueWith: remainingPending > 0 ? 
+            `curl "${new URL(request.url).origin}/detail-batch?batch=${batchSize}"` : null,
+          checkProgress: `curl "${new URL(request.url).origin}/api/livers" | jq '{total: .total, withDetails: .stats.withDetails, pending: .stats.pending}'`
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Detail batch failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/kv-test') {
+      try {
+        console.log('🔧 KV Test - Environment check:');
+        console.log('- env type:', typeof env);
+        console.log('- env keys:', Object.keys(env));
+        console.log('- LIVER_DATA exists:', !!env.LIVER_DATA);
+        console.log('- LIVER_DATA type:', typeof env.LIVER_DATA);
+
+        // テストデータを書き込み
+        const testData = {
+          timestamp: Date.now(),
+          test: 'KV storage test',
+          message: 'This is a test write',
+          randomValue: Math.random()
+        };
+
+        if (env.LIVER_DATA) {
+          console.log('📝 Attempting to write test data...');
+          await env.LIVER_DATA.put('test_key', JSON.stringify(testData));
+          console.log('✅ Test data written successfully');
+
+          // すぐに読み取りテスト
+          console.log('📖 Attempting to read test data...');
+          const readResult = await env.LIVER_DATA.get('test_key');
+          console.log('📖 Read result:', readResult ? 'SUCCESS' : 'FAILED');
+
+          if (readResult) {
+            const parsedResult = JSON.parse(readResult);
+            console.log('📖 Parsed result:', parsedResult);
+          }
+
+          // latest_dataキーも確認
+          console.log('🔍 Checking latest_data key...');
+          const latestDataResult = await env.LIVER_DATA.get('latest_data');
+          console.log('🔍 latest_data exists:', !!latestDataResult);
+          if (latestDataResult) {
+            const parsedLatest = JSON.parse(latestDataResult);
+            console.log('🔍 latest_data summary:', {
+              total: parsedLatest.total,
+              timestamp: parsedLatest.timestamp,
+              lastUpdate: parsedLatest.lastUpdate
+            });
+          }
+
+          return new Response(JSON.stringify({
+            success: true,
+            kvExists: !!env.LIVER_DATA,
+            writeTest: 'success',
+            readTest: readResult ? 'success' : 'failed',
+            testData: readResult ? JSON.parse(readResult) : null,
+            latestDataExists: !!latestDataResult,
+            latestDataSummary: latestDataResult ? {
+              total: JSON.parse(latestDataResult).total,
+              lastUpdate: JSON.parse(latestDataResult).lastUpdate
+            } : null,
+            envInfo: {
+              keys: Object.keys(env),
+              liverDataType: typeof env.LIVER_DATA
+            }
+          }, null, 2), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        } else {
+          console.log('❌ LIVER_DATA is not available');
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'LIVER_DATA KV namespace not found',
+            envKeys: Object.keys(env),
+            suggestion: 'Check wrangler.toml KV namespace configuration'
+          }, null, 2), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+
+      } catch (error) {
+        console.error('KV Test error:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          stack: error.stack
+        }, null, 2), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/fix-images') {
+      try {
+        const batchSize = parseInt(new URL(request.url).searchParams.get('batch') || '3');
+        
+        console.log(`🖼️ Starting image fix process (batch size: ${batchSize})...`);
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        let subrequestCount = 0;
+        let imagesProcessed = 0;
+        
+        // 最初のN人の画像のみ処理
+        for (let i = 0; i < Math.min(existingData.data.length, batchSize) && subrequestCount < 45; i++) {
+          const liver = existingData.data[i];
+          
+          console.log(`🖼️ Processing image for: ${liver.name} (${i + 1}/${batchSize})`);
+          
+          try {
+            // 元画像URLを構築
+            const originalImageUrl = `https://www.comisapolive.com/user_files_thumbnail/${liver.originalId}/`;
+            
+            // 画像を取得（HEADリクエストで存在確認）
+            const headResponse = await fetch(originalImageUrl, { method: 'HEAD' });
+            subrequestCount++;
+            
+            if (headResponse.ok) {
+              // 実際の画像を取得
+              const imageResponse = await fetch(originalImageUrl);
+              subrequestCount++;
+              
+              if (imageResponse.ok) {
+                const imageBuffer = await imageResponse.arrayBuffer();
+                const imageId = `${liver.id}.jpg`;
+                
+                // R2に保存
+                if (env.IMAGES) {
+                  await env.IMAGES.put(imageId, imageBuffer, {
+                    httpMetadata: { contentType: 'image/jpeg' }
+                  });
+                  
+                  console.log(`✅ Saved image for ${liver.name}: ${imageId}`);
+                  imagesProcessed++;
+                }
+              }
+            }
+            
+            await sleep(200); // 短い休憩
+            
+          } catch (imageError) {
+            console.error(`❌ Failed to process image for ${liver.name}:`, imageError.message);
+            subrequestCount++;
+          }
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Image fix completed',
+          imagesProcessed: imagesProcessed,
+          subrequestsUsed: subrequestCount,
+          batchSize: batchSize,
+          nextBatch: imagesProcessed < existingData.data.length ? 
+            `curl "${new URL(request.url).origin}/fix-images?batch=${batchSize}"` : null
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Image fix failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 画像無効化処理：画像なしでAPIを使いやすくする
+    if (url.pathname === '/api/livers-no-images') {
+      try {
+        const data = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        
+        if (!data) {
+          return new Response(JSON.stringify({
+            data: [], 
+            total: 0, 
+            error: "No data found in storage"
+          }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+        
+        const parsedData = JSON.parse(data);
+        
+        // 画像URLを無効化またはプレースホルダーに置換
+        const cleanedData = {
+          ...parsedData,
+          data: parsedData.data.map(liver => ({
+            ...liver,
+            imageUrl: null, // 画像URLを無効化
+            hasImageData: false,
+            profileImages: liver.profileImages ? liver.profileImages.map(img => ({
+              ...img,
+              url: null, // プロフィール画像も無効化
+              originalUrl: img.originalUrl // 元URLは保持
+            })) : []
+          }))
+        };
+        
+        return new Response(JSON.stringify(cleanedData), {
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'max-age=3600',
+            ...corsHeaders
+          }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          data: [], 
+          total: 0, 
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/fix-images-v2') {
+      try {
+        const batchSize = parseInt(new URL(request.url).searchParams.get('batch') || '2');
+        
+        console.log(`🖼️ Starting improved image fix process (batch size: ${batchSize})...`);
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        let subrequestCount = 0;
+        let imagesProcessed = 0;
+        const results = [];
+        
+        // 最初のN人の画像のみ処理
+        for (let i = 0; i < Math.min(existingData.data.length, batchSize) && subrequestCount < 40; i++) {
+          const liver = existingData.data[i];
+          
+          console.log(`🖼️ Processing image for: ${liver.name} (ID: ${liver.originalId})`);
+          
+          const result = {
+            liverName: liver.name,
+            originalId: liver.originalId,
+            success: false,
+            error: null,
+            imageUrl: null
+          };
+          
+          try {
+            // profileImages から元のURLを取得
+            let originalImageUrl = null;
+            
+            if (liver.profileImages && liver.profileImages.length > 0) {
+              originalImageUrl = liver.profileImages[0].originalUrl;
+              console.log(`📸 Using profileImage URL: ${originalImageUrl}`);
+            } else {
+              // フォールバック: 推測URLを構築
+              originalImageUrl = `https://www.comisapolive.com/user_files_thumbnail/${liver.originalId}/`;
+              console.log(`📸 Using fallback URL: ${originalImageUrl}`);
+            }
+            
+            if (!originalImageUrl) {
+              throw new Error('No image URL available');
+            }
+            
+            // 画像を取得
+            console.log(`📥 Fetching image from: ${originalImageUrl}`);
+            const imageResponse = await fetch(originalImageUrl);
+            subrequestCount++;
+            
+            console.log(`📥 Image response status: ${imageResponse.status}`);
+            
+            if (imageResponse.ok) {
+              const imageBuffer = await imageResponse.arrayBuffer();
+              const imageSize = imageBuffer.byteLength;
+              
+              console.log(`📏 Image size: ${imageSize} bytes`);
+              
+              if (imageSize > 0) {
+                const imageId = `${liver.id}.jpg`;
+                
+                // R2に保存
+                if (env.IMAGES) {
+                  await env.IMAGES.put(imageId, imageBuffer, {
+                    httpMetadata: { contentType: 'image/jpeg' }
+                  });
+                  
+                  console.log(`✅ Saved image for ${liver.name}: ${imageId}`);
+                  result.success = true;
+                  result.imageUrl = `/api/images/${imageId}`;
+                  imagesProcessed++;
+                } else {
+                  throw new Error('IMAGES binding not available');
+                }
+              } else {
+                throw new Error('Empty image data');
+              }
+            } else {
+              throw new Error(`HTTP ${imageResponse.status}: ${imageResponse.statusText}`);
+            }
+            
+            await sleep(500); // 長めの休憩
+            
+          } catch (imageError) {
+            console.error(`❌ Failed to process image for ${liver.name}:`, imageError);
+            result.error = imageError.message;
+            subrequestCount++;
+          }
+          
+          results.push(result);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Improved image fix completed',
+          imagesProcessed: imagesProcessed,
+          subrequestsUsed: subrequestCount,
+          batchSize: batchSize,
+          results: results,
+          nextBatch: imagesProcessed < existingData.data.length ? 
+            `curl "${new URL(request.url).origin}/fix-images-v2?batch=${batchSize}"` : null
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Improved image fix failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          stack: error.stack
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // 画像URLテスト用エンドポイント
+    if (url.pathname === '/test-image-urls') {
+      try {
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        const testResults = [];
+        
+        // 最初の3人のURLをテスト
+        for (let i = 0; i < Math.min(3, existingData.data.length); i++) {
+          const liver = existingData.data[i];
+          
+          const urlTests = [];
+          
+          // profileImages のURL
+          if (liver.profileImages && liver.profileImages.length > 0) {
+            urlTests.push({
+              type: 'profileImage',
+              url: liver.profileImages[0].originalUrl
+            });
+          }
+          
+          // 推測URL
+          urlTests.push({
+            type: 'fallback',
+            url: `https://www.comisapolive.com/user_files_thumbnail/${liver.originalId}/`
+          });
+          
+          testResults.push({
+            liverName: liver.name,
+            originalId: liver.originalId,
+            availableUrls: urlTests
+          });
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Image URL test results',
+          testResults: testResults
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/fix-images-browser') {
+      try {
+        const batchSize = parseInt(new URL(request.url).searchParams.get('batch') || '2');
+        
+        console.log(`🖼️ Starting browser-like image fix process (batch size: ${batchSize})...`);
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        let subrequestCount = 0;
+        let imagesProcessed = 0;
+        const results = [];
+        
+        // 最初のN人の画像のみ処理
+        for (let i = 0; i < Math.min(existingData.data.length, batchSize) && subrequestCount < 40; i++) {
+          const liver = existingData.data[i];
+          
+          console.log(`🖼️ Processing browser-like image for: ${liver.name} (ID: ${liver.originalId})`);
+          
+          const result = {
+            liverName: liver.name,
+            originalId: liver.originalId,
+            success: false,
+            error: null,
+            imageUrl: null,
+            statusCode: null
+          };
+          
+          try {
+            // profileImages から元のURLを取得
+            let originalImageUrl = null;
+            
+            if (liver.profileImages && liver.profileImages.length > 0) {
+              originalImageUrl = liver.profileImages[0].originalUrl;
+              console.log(`📸 Using profileImage URL: ${originalImageUrl}`);
+            }
+            
+            if (!originalImageUrl) {
+              throw new Error('No image URL available');
+            }
+            
+            // より完全なブラウザヘッダーで画像を取得
+            console.log(`📥 Fetching browser-like image from: ${originalImageUrl}`);
+            const imageResponse = await fetch(originalImageUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"macOS"'
+              }
+            });
+            subrequestCount++;
+            
+            result.statusCode = imageResponse.status;
+            console.log(`📥 Browser-like image response status: ${imageResponse.status}`);
+            console.log(`📥 Response headers:`, Object.fromEntries(imageResponse.headers.entries()));
+            
+            if (imageResponse.ok) {
+              const imageBuffer = await imageResponse.arrayBuffer();
+              const imageSize = imageBuffer.byteLength;
+              
+              console.log(`📏 Image size: ${imageSize} bytes`);
+              
+              if (imageSize > 0) {
+                const imageId = `${liver.id}.jpg`;
+                
+                // R2に保存
+                if (env.IMAGES) {
+                  await env.IMAGES.put(imageId, imageBuffer, {
+                    httpMetadata: { 
+                      contentType: imageResponse.headers.get('content-type') || 'image/jpeg'
+                    }
+                  });
+                  
+                  console.log(`✅ Saved browser-like image for ${liver.name}: ${imageId}`);
+                  result.success = true;
+                  result.imageUrl = `/api/images/${imageId}`;
+                  imagesProcessed++;
+                } else {
+                  throw new Error('IMAGES binding not available');
+                }
+              } else {
+                throw new Error('Empty image data');
+              }
+            } else {
+              // レスポンスボディも確認
+              const errorText = await imageResponse.text();
+              console.log(`❌ Error response body:`, errorText.substring(0, 200));
+              throw new Error(`HTTP ${imageResponse.status}: ${imageResponse.statusText}`);
+            }
+            
+            await sleep(2000); // 長めの休憩でサーバー負荷を軽減
+            
+          } catch (imageError) {
+            console.error(`❌ Failed to process browser-like image for ${liver.name}:`, imageError);
+            result.error = imageError.message;
+            subrequestCount++;
+          }
+          
+          results.push(result);
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Browser-like image fix completed',
+          imagesProcessed: imagesProcessed,
+          subrequestsUsed: subrequestCount,
+          batchSize: batchSize,
+          results: results,
+          nextBatch: imagesProcessed > 0 && imagesProcessed < existingData.data.length ? 
+            `curl "${new URL(request.url).origin}/fix-images-browser?batch=${batchSize}"` : null
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Browser-like image fix failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          stack: error.stack
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/fix-images-progressive') {
+      try {
+        const batchSize = parseInt(new URL(request.url).searchParams.get('batch') || '2');
+        const skipProcessed = new URL(request.url).searchParams.get('skip') !== 'false';
+        
+        console.log(`🖼️ Starting progressive image fix process (batch size: ${batchSize}, skip processed: ${skipProcessed})...`);
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        let subrequestCount = 0;
+        let imagesProcessed = 0;
+        const results = [];
+        let processedCount = 0;
+        let skippedCount = 0;
+        
+        // R2で既存画像をチェックして処理済みを特定
+        const processedImages = new Set();
+        if (skipProcessed) {
+          console.log('🔍 Checking for existing images in R2...');
+          // 簡易的に最初の数人をチェック
+          for (let i = 0; i < Math.min(10, existingData.data.length); i++) {
+            const liver = existingData.data[i];
+            const imageId = `${liver.id}.jpg`;
+            try {
+              const existingImage = await env.IMAGES.get(imageId);
+              if (existingImage) {
+                processedImages.add(liver.id);
+                console.log(`✓ Already processed: ${liver.name}`);
+              }
+            } catch (e) {
+              // 画像が存在しない（正常）
+            }
+          }
+          console.log(`📊 Found ${processedImages.size} already processed images`);
+        }
+        
+        // 未処理のライバーのみを対象に処理
+        let processedInBatch = 0;
+        for (let i = 0; i < existingData.data.length && processedInBatch < batchSize && subrequestCount < 40; i++) {
+          const liver = existingData.data[i];
+          
+          // 既に処理済みの場合はスキップ
+          if (skipProcessed && processedImages.has(liver.id)) {
+            skippedCount++;
+            continue;
+          }
+          
+          console.log(`🖼️ Processing progressive image for: ${liver.name} (ID: ${liver.originalId})`);
+          
+          const result = {
+            liverName: liver.name,
+            originalId: liver.originalId,
+            liverId: liver.id,
+            success: false,
+            error: null,
+            imageUrl: null,
+            statusCode: null,
+            skipped: false
+          };
+          
+          try {
+            // profileImages から元のURLを取得
+            let originalImageUrl = null;
+            
+            if (liver.profileImages && liver.profileImages.length > 0) {
+              originalImageUrl = liver.profileImages[0].originalUrl;
+              console.log(`📸 Using profileImage URL: ${originalImageUrl}`);
+            }
+            
+            if (!originalImageUrl) {
+              throw new Error('No image URL available');
+            }
+            
+            // ブラウザライクなヘッダーで画像を取得
+            console.log(`📥 Fetching progressive image from: ${originalImageUrl}`);
+            const imageResponse = await fetch(originalImageUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"macOS"'
+              }
+            });
+            subrequestCount++;
+            
+            result.statusCode = imageResponse.status;
+            console.log(`📥 Progressive image response status: ${imageResponse.status}`);
+            
+            if (imageResponse.ok) {
+              const imageBuffer = await imageResponse.arrayBuffer();
+              const imageSize = imageBuffer.byteLength;
+              
+              console.log(`📏 Image size: ${imageSize} bytes`);
+              
+              if (imageSize > 0) {
+                const imageId = `${liver.id}.jpg`;
+                
+                // R2に保存
+                if (env.IMAGES) {
+                  await env.IMAGES.put(imageId, imageBuffer, {
+                    httpMetadata: { 
+                      contentType: imageResponse.headers.get('content-type') || 'image/jpeg'
+                    }
+                  });
+                  
+                  console.log(`✅ Saved progressive image for ${liver.name}: ${imageId}`);
+                  result.success = true;
+                  result.imageUrl = `/api/images/${imageId}`;
+                  imagesProcessed++;
+                  processedInBatch++;
+                } else {
+                  throw new Error('IMAGES binding not available');
+                }
+              } else {
+                throw new Error('Empty image data');
+              }
+            } else {
+              throw new Error(`HTTP ${imageResponse.status}: ${imageResponse.statusText}`);
+            }
+            
+            await sleep(1500); // 適度な休憩
+            
+          } catch (imageError) {
+            console.error(`❌ Failed to process progressive image for ${liver.name}:`, imageError);
+            result.error = imageError.message;
+            subrequestCount++;
+            processedInBatch++; // エラーでもカウント
+          }
+          
+          results.push(result);
+          processedCount++;
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Progressive image fix completed',
+          imagesProcessed: imagesProcessed,
+          subrequestsUsed: subrequestCount,
+          batchSize: batchSize,
+          skippedCount: skippedCount,
+          processedCount: processedCount,
+          results: results,
+          totalLivers: existingData.data.length,
+          nextBatch: (processedCount + skippedCount) < existingData.data.length ? 
+            `curl "${new URL(request.url).origin}/fix-images-progressive?batch=${batchSize}"` : null,
+          allComplete: (processedCount + skippedCount) >= existingData.data.length
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Progressive image fix failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message,
+          stack: error.stack
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    if (url.pathname === '/fix-all-images') {
+      try {
+        console.log(`🖼️ Starting complete image fix process...`);
+        
+        // 既存データを取得
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        let subrequestCount = 0;
+        let imagesProcessed = 0;
+        const results = [];
+        let skippedCount = 0;
+        
+        // R2で既存画像をチェック
+        const processedImages = new Set();
+        console.log('🔍 Checking for existing images in R2...');
+        
+        for (const liver of existingData.data) {
+          const imageId = `${liver.id}.jpg`;
+          try {
+            const existingImage = await env.IMAGES.get(imageId);
+            if (existingImage) {
+              processedImages.add(liver.id);
+              console.log(`✓ Already processed: ${liver.name}`);
+            }
+          } catch (e) {
+            // 画像が存在しない（未処理）
+          }
+        }
+        
+        console.log(`📊 Found ${processedImages.size} already processed images`);
+        console.log(`📊 Need to process ${existingData.data.length - processedImages.size} images`);
+        
+        // 全ライバーを処理（subrequest制限まで）
+        for (const liver of existingData.data) {
+          if (subrequestCount >= 45) { // 安全マージン
+            console.log(`⚠️ Approaching subrequest limit, stopping at ${subrequestCount}`);
+            break;
+          }
+          
+          // 既に処理済みの場合はスキップ
+          if (processedImages.has(liver.id)) {
+            skippedCount++;
+            results.push({
+              liverName: liver.name,
+              originalId: liver.originalId,
+              liverId: liver.id,
+              success: true,
+              skipped: true,
+              imageUrl: `/api/images/${liver.id}.jpg`
+            });
+            continue;
+          }
+          
+          console.log(`🖼️ Processing image for: ${liver.name} (${imagesProcessed + 1}/${existingData.data.length - processedImages.size})`);
+          
+          const result = {
+            liverName: liver.name,
+            originalId: liver.originalId,
+            liverId: liver.id,
+            success: false,
+            error: null,
+            imageUrl: null,
+            statusCode: null,
+            skipped: false
+          };
+          
+          try {
+            // profileImages から元のURLを取得
+            let originalImageUrl = null;
+            
+            if (liver.profileImages && liver.profileImages.length > 0) {
+              originalImageUrl = liver.profileImages[0].originalUrl;
+            }
+            
+            if (!originalImageUrl) {
+              throw new Error('No image URL available');
+            }
+            
+            // ブラウザライクなヘッダーで画像を取得
+            const imageResponse = await fetch(originalImageUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'same-origin'
+              }
+            });
+            subrequestCount++;
+            
+            result.statusCode = imageResponse.status;
+            
+            if (imageResponse.ok) {
+              const imageBuffer = await imageResponse.arrayBuffer();
+              const imageSize = imageBuffer.byteLength;
+              
+              if (imageSize > 0) {
+                const imageId = `${liver.id}.jpg`;
+                
+                // R2に保存
+                if (env.IMAGES) {
+                  await env.IMAGES.put(imageId, imageBuffer, {
+                    httpMetadata: { 
+                      contentType: imageResponse.headers.get('content-type') || 'image/jpeg'
+                    }
+                  });
+                  
+                  console.log(`✅ Saved image for ${liver.name}: ${imageId} (${imagesProcessed + 1})`);
+                  result.success = true;
+                  result.imageUrl = `/api/images/${imageId}`;
+                  imagesProcessed++;
+                } else {
+                  throw new Error('IMAGES binding not available');
+                }
+              } else {
+                throw new Error('Empty image data');
+              }
+            } else {
+              throw new Error(`HTTP ${imageResponse.status}: ${imageResponse.statusText}`);
+            }
+            
+            // 短い休憩（効率化のため短縮）
+            await sleep(800);
+            
+          } catch (imageError) {
+            console.error(`❌ Failed to process image for ${liver.name}:`, imageError);
+            result.error = imageError.message;
+            subrequestCount++;
+          }
+          
+          results.push(result);
+        }
+        
+        const totalProcessed = processedImages.size + imagesProcessed;
+        const allComplete = totalProcessed >= existingData.data.length;
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Complete image fix finished',
+          newImagesProcessed: imagesProcessed,
+          alreadyProcessed: processedImages.size,
+          totalProcessed: totalProcessed,
+          totalLivers: existingData.data.length,
+          subrequestsUsed: subrequestCount,
+          allComplete: allComplete,
+          results: results.filter(r => !r.skipped), // スキップ分は除外して表示
+          summary: {
+            success: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success && !r.skipped).length,
+            skipped: results.filter(r => r.skipped).length
+          },
+          continueWith: !allComplete ? 
+            `curl "${new URL(request.url).origin}/fix-all-images"` : null
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        console.error('❌ Complete image fix failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+    
+    if (url.pathname === '/fix-images-inline') {
+      try {
+        console.log(`🖼️ Starting inline image fix process...`);
+        
+        const existingDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        if (!existingDataStr) {
+          throw new Error('No existing data found.');
+        }
+        
+        const existingData = JSON.parse(existingDataStr);
+        let subrequestCount = 0;
+        let imagesProcessed = 0;
+        let permanentlySaved = 0;
+        const results = [];
+        
+        // 全ライバーの画像を処理
+        for (const liver of existingData.data) {
+          if (subrequestCount >= 45) {
+            console.log(`⚠️ Subrequest limit reached`);
+            break;
+          }
+          
+          console.log(`🔍 Processing image for: ${liver.name}`);
+          
+          // 画像存在確認（インライン）
+          const imageId = `${liver.id}.jpg`;
+          let imageExists = false;
+          
+          try {
+            const r2Object = await env.IMAGES.get(imageId);
+            if (r2Object) {
+              imageExists = true;
+              console.log(`✓ Image already exists: ${liver.name}`);
+            }
+          } catch (e) {
+            // 画像が存在しない（正常）
+          }
+          
+          if (imageExists) {
+            results.push({
+              liverName: liver.name,
+              status: 'already_exists',
+              imageUrl: `/api/images/${imageId}`
+            });
+            continue;
+          }
+          
+          // 画像を取得して保存
+          try {
+            let originalImageUrl = null;
+            if (liver.profileImages && liver.profileImages.length > 0) {
+              originalImageUrl = liver.profileImages[0].originalUrl;
+            }
+            
+            if (!originalImageUrl) {
+              throw new Error('No image URL available');
+            }
+            
+            console.log(`📥 Fetching image: ${liver.name}`);
+            const imageResponse = await fetch(originalImageUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache'
+              }
+            });
+            subrequestCount++;
+            
+            if (imageResponse.ok) {
+              const imageBuffer = await imageResponse.arrayBuffer();
+              const contentType = imageResponse.headers.get('content-type');
+              
+              if (imageBuffer.byteLength > 0) {
+                // 永続的な保存（インライン）
+                await env.IMAGES.put(imageId, imageBuffer, {
+                  httpMetadata: { 
+                    contentType: contentType || 'image/jpeg',
+                    cacheControl: 'public, max-age=31536000',
+                  },
+                  customMetadata: {
+                    'liver-id': liver.id,
+                    'upload-time': new Date().toISOString(),
+                    'source': 'inline-scraper',
+                    'permanent': 'true'
+                  }
+                });
+                
+                // KVにも記録
+                if (env.IMAGE_HASHES) {
+                  await env.IMAGE_HASHES.put(`image_${liver.id}`, JSON.stringify({
+                    imageId: imageId,
+                    uploadTime: new Date().toISOString(),
+                    size: imageBuffer.byteLength,
+                    contentType: contentType || 'image/jpeg',
+                    permanent: true
+                  }));
+                }
+                
+                console.log(`✅ Saved: ${liver.name} (${imageBuffer.byteLength} bytes)`);
+                permanentlySaved++;
+                results.push({
+                  liverName: liver.name,
+                  status: 'newly_saved',
+                  imageUrl: `/api/images/${imageId}`,
+                  size: imageBuffer.byteLength
+                });
+              }
+            } else {
+              throw new Error(`HTTP ${imageResponse.status}`);
+            }
+            
+            await sleep(1000);
+            imagesProcessed++;
+            
+          } catch (error) {
+            console.error(`❌ Failed to save ${liver.name}:`, error);
+            results.push({
+              liverName: liver.name,
+              status: 'failed',
+              error: error.message
+            });
+            subrequestCount++;
+          }
+        }
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Inline image fix completed',
+          totalLivers: existingData.data.length,
+          permanentlySaved: permanentlySaved,
+          subrequestsUsed: subrequestCount,
+          results: results
+        }, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // ライバー一覧API
+    if (url.pathname === '/api/livers') {
+      try {
+        const data = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+        
+        if (!data) {
+          return new Response(JSON.stringify({
+            data: [], 
+            total: 0, 
+            error: "No data found in storage",
+            suggestion: "Run /full-scrape to collect data"
+          }), {
+            headers: { 
+              'Content-Type': 'application/json',
+              'Cache-Control': 'max-age=300',
+              ...corsHeaders
+            }
+          });
+        }
+        
+        // JSONパースを安全に実行
+        let parsedData;
+        try {
+          parsedData = JSON.parse(data);
+        } catch (parseError) {
+          return new Response(JSON.stringify({
+            data: [], 
+            total: 0, 
+            error: "Data parsing failed",
+            rawDataPreview: data.substring(0, 200)
+          }), {
+            headers: { 
+              'Content-Type': 'application/json',
+              ...corsHeaders
+            }
+          });
+        }
+        
+        return new Response(JSON.stringify(parsedData), {
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'max-age=3600',
+            ...corsHeaders
+          }
+        });
+        
+      } catch (error) {
+        return new Response(JSON.stringify({
+          data: [], 
+          total: 0, 
+          error: error.message
+        }), {
+          status: 500,
+          headers: { 
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          }
+        });
+      }
+    }
+    
+    // 画像API
+    if (url.pathname.startsWith('/api/images/')) {
+      const imageId = url.pathname.split('/').pop();
+      const image = env.IMAGES ? await env.IMAGES.get(imageId) : null;
+      
+      if (!image) {
+        return new Response('Image not found', { status: 404 });
+      }
+      
+      return new Response(image.body, {
+        headers: { 
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'max-age=86400',
+          ...corsHeaders
+        }
+      });
+    }
+    
+    // エラー情報API
+    if (url.pathname === '/api/status') {
+      const latestData = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
+      const lastError = env.LIVER_DATA ? await env.LIVER_DATA.get('last_error') : null;
+      
+      return new Response(JSON.stringify({
+        status: 'running',
+        lastUpdate: latestData ? JSON.parse(latestData).timestamp : null,
+        lastError: lastError ? JSON.parse(lastError) : null
+      }), {
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
+    }
+    
+    return new Response(`
+Liver Scraper API
+=================
+
+Endpoints:
+- GET /api/livers           : Get all liver data
+- GET /api/images/:id       : Get liver images
+- GET /api/status           : Get scraper status
+- GET /test                 : Test single liver extraction
+- GET /manual-scrape        : 🆕 Manually trigger full scraping
+- GET /scrape-status        : 🆕 Get detailed scraping status
+- GET /debug-login-only     : Test login only
+- GET /debug-list-parsing   : Test list page parsing
+
+Usage: https://your-worker.workers.dev/api/livers
+    `, {
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+};
+
+// 認証付き全ページスクレイピング
+async function scrapeAllPagesWithAuthentication(env) {
+  console.log('🔧 Environment check:', {
+    hasLiverData: !!env.LIVER_DATA,
+    hasImageHashes: !!env.IMAGE_HASHES,
+    hasImages: !!env.IMAGES,
+    envKeys: Object.keys(env)
+  });
+  
+  const baseUrl = 'https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1';
+  let allLivers = [];
+  let currentPage = 1;
+  let maxPages = null;
+  
+  // ✅ ログイン処理を最初に実行
+  console.log('🔐 Performing login...');
+  const loginResult = await performRobustLogin(env);
+  
+  if (!loginResult.success) {
+    throw new Error(`Login failed: ${loginResult.error}`);
+  }
+  
+  console.log('✅ Login successful');
+  
+  do {
+    console.log(`📄 Scraping page ${currentPage}...`);
+    
+    const pageUrl = currentPage === 1 ? baseUrl : `${baseUrl}&page=${currentPage}`;
+    
+    try {
+      // ✅ 認証付きでページ取得
+      let response = await fetch(pageUrl, {
+        headers: {
+          'Cookie': loginResult.cookies,  // loginResult が定義された後
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+          'Referer': 'https://www.comisapolive.com/'
+        }
+      });
+      
+      console.log(`📄 Page ${currentPage} response:`, {
+        status: response.status,
+        url: response.url,
+        cookiesUsed: !!loginResult.cookies
+      });
+      
+      // 500エラーの場合はリトライ
+      if (response.status === 500) {
+        console.log(`⚠️ Server error on page ${currentPage}, retrying in 5 seconds...`);
+        await sleep(5000);
+        
+        response = await fetch(pageUrl, {
+          headers: {
+            'Cookie': loginResult.cookies,
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://www.comisapolive.com/'
+          }
+        });
+      }
+
+      if (!response.ok) {
+        console.error(`Failed to fetch page ${currentPage}: ${response.status}`);
+        break;
+      }
+      
+      const html = await response.text();
+      
+      // 残りの処理は既存のまま...
+      if (maxPages === null) {
+        maxPages = getMaxPages(html);
+        console.log(`📊 Total pages detected: ${maxPages}`);
+      }
+      
+      const pageData = await parseHTMLPageWithDetails(html, env, currentPage);
+      
+      if (pageData.length === 0) {
+        console.log(`No data found on page ${currentPage}, stopping`);
+        break;
+      }
+      
+      // 詳細情報取得処理...
+      for (const liver of pageData) {
+        if (liver.detailUrl) {
+          console.log(`🔍 Fetching detailed info for: ${liver.name}`);
+          const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, env);
+          Object.assign(liver, detailInfo);
+          
+          if (detailInfo.profileInfo && detailInfo.profileInfo.gender) {
+            console.log(`👤 Gender found for ${liver.name}: ${detailInfo.profileInfo.gender}`);
+          }
+          
+          // 画像を自動収集
+          if (liver.profileImages && liver.profileImages.length > 0) {
+            console.log(`📸 Auto-collecting image for: ${liver.name}`);
+            try {
+              await autoCollectAndStoreImage(liver, env);
+            } catch (imageError) {
+              console.error(`❌ Image collection failed for ${liver.name}:`, imageError.message);
+            }
+          }
+          
+          await sleep(1000);
+        }
+      }
+      
+      allLivers = allLivers.concat(pageData);
+      console.log(`✅ Page ${currentPage}: ${pageData.length} livers processed (Total: ${allLivers.length})`);
+      
+      if (currentPage < maxPages) {
+        await sleep(2000);
+      }
+      
+      currentPage++;
+      
+    } catch (error) {
+      console.error(`Error scraping page ${currentPage}:`, error);
+      break;
+    }
+    
+  } while (currentPage <= maxPages);
+  
+  console.log(`🎉 Total livers collected: ${allLivers.length}`);
+  return allLivers;
+}
+
+// 自動画像収集・保存関数
+async function autoCollectAndStoreImage(liver, env) {
+  if (!env.IMAGES || !env.IMAGE_HASHES) {
+    console.log(`⚠️ Storage bindings not available for ${liver.name}`);
+    return;
+  }
+
+  const liverId = liver.id;
+  const imageId = `${liverId}.jpg`;
+  
+  // 既に保存済みかチェック
+  try {
+    const existingImage = await env.IMAGES.get(imageId);
+    if (existingImage) {
+      console.log(`📸 Image already exists for ${liver.name}, skipping`);
+      return;
+    }
+  } catch (error) {
+    console.log(`📸 Checking existing image failed, proceeding with collection`);
+  }
+
+  // profileImagesからURLを取得
+  let imageUrl = null;
+  if (liver.profileImages && liver.profileImages.length > 0) {
+    imageUrl = liver.profileImages[0].originalUrl;
+  }
+
+  if (!imageUrl) {
+    console.log(`📸 No image URL available for ${liver.name}`);
+    return;
+  }
+
+  try {
+    console.log(`📥 Downloading image from: ${imageUrl}`);
+    const imageResponse = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        'Referer': 'https://www.comisapolive.com/',
+        'Sec-Fetch-Dest': 'image',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'same-origin'
+      }
+    });
+
+    if (!imageResponse.ok) {
+      throw new Error(`HTTP ${imageResponse.status}: ${imageResponse.statusText}`);
+    }
+
+    const imageBuffer = await imageResponse.arrayBuffer();
+    if (imageBuffer.byteLength === 0) {
+      throw new Error('Empty image data received');
+    }
+
+    // R2に保存
+    await env.IMAGES.put(imageId, imageBuffer, {
+      httpMetadata: { 
+        contentType: imageResponse.headers.get('content-type') || 'image/jpeg',
+        cacheControl: 'public, max-age=31536000'
+      }
+    });
+
+    // ハッシュも保存
+    const imageHash = generateHash(new Uint8Array(imageBuffer));
+    await env.IMAGE_HASHES.put(`hash_${liverId}`, imageHash);
+
+    console.log(`✅ Auto-collected image for ${liver.name}: ${imageId} (${imageBuffer.byteLength} bytes)`);
+    
+  } catch (error) {
+    console.error(`❌ Auto-collect failed for ${liver.name}:`, error.message);
+    throw error;
+  }
+}
+
+// 堅牢なログイン処理
+async function performRobustLogin(env) {
+  try {
+    console.log('🔐 Starting login process...');
+    
+    // 1. ログインページを取得
+    const loginPageResponse = await fetch('https://www.comisapolive.com/login/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8'
+      }
+    });
+    
+    if (!loginPageResponse.ok) {
+      return { success: false, error: `Login page failed: ${loginPageResponse.status}` };
+    }
+    
+    const loginPageHtml = await loginPageResponse.text();
+    const loginPageCookies = loginPageResponse.headers.get('set-cookie') || '';
+    
+    // 2. フォーム情報を抽出
+    const csrfToken = extractCSRFToken(loginPageHtml);
+    const hiddenFields = extractHiddenFields(loginPageHtml);
+    const actionUrl = extractFormAction(loginPageHtml) || 'https://www.comisapolive.com/login/';
+    
+    console.log('📝 Form analysis complete:', {
+      csrf: !!csrfToken,
+      hidden: Object.keys(hiddenFields).length,
+      action: actionUrl.includes('login')
+    });
+    
+    // 3. ログインデータを準備
+    const loginData = new URLSearchParams();
+    
+    // 環境変数から認証情報を取得（fallback付き）
+    const email = env.LOGIN_ID || 'comisapolive@gmail.com';
+    const password = env.LOGIN_PASSWORD || 'cord3cord3';
+    
+    // 複数のフィールド名パターンを試行
+    const emailFields = ['email', 'username', 'login_id', 'user_email', 'mail'];
+    const passwordFields = ['password', 'passwd', 'pass', 'login_password'];
+    
+    emailFields.forEach(field => {
+      loginData.append(field, email);
+    });
+    
+    passwordFields.forEach(field => {
+      loginData.append(field, password);
+    });
+    
+    // CSRF対応
+    if (csrfToken) {
+      const csrfFields = ['csrf_token', '_token', 'authenticity_token', 'csrfmiddlewaretoken'];
+      csrfFields.forEach(field => {
+        loginData.append(field, csrfToken);
+      });
+    }
+    
+    // hidden フィールド追加
+    Object.entries(hiddenFields).forEach(([name, value]) => {
+      loginData.append(name, value);
+    });
+    
+    // 4. ログイン実行
+    const loginResponse = await fetch(actionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.comisapolive.com/login/',
+        'Origin': 'https://www.comisapolive.com',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Cookie': loginPageCookies
+      },
+      body: loginData.toString(),
+      redirect: 'manual'
+    });
+    
+    const loginResponseCookies = loginResponse.headers.get('set-cookie') || '';
+	const allCookies = combineCookies(loginPageCookies, loginResponseCookies);
+
+	// デバッグ情報を追加
+	console.log('🔍 Login response analysis:', {
+	status: loginResponse.status,
+	url: loginResponse.url,
+	hasSetCookie: !!loginResponseCookies,
+	cookieLength: loginResponseCookies.length,
+	totalCookieLength: allCookies.length
+	});
+
+	// 5. 成功判定
+	let success = false;
+	let method = '';
+    
+    // リダイレクト判定
+    if (loginResponse.status >= 300 && loginResponse.status < 400) {
+	const location = loginResponse.headers.get('location');
+	console.log('📍 Redirect detected:', { 
+		location, 
+		hasLogin: location?.includes('login'),
+		hasError: location?.includes('error')
+	});
+	
+	if (location && !location.includes('login') && !location.includes('error')) {
+		success = true;
+		method = 'redirect';
+	}
+	}
+    
+    // レスポンス内容判定
+	if (!success) {
+	const loginResponseText = await loginResponse.text();
+	console.log('📄 Response preview (first 300 chars):', loginResponseText.substring(0, 300));
+	console.log('📊 Response length:', loginResponseText.length);
+	
+	const successPatterns = ['dashboard', 'マイページ', 'ログアウト', 'menu', 'profile', 'liver', '設定', 'ホーム', 'アカウント'];
+	const failurePatterns = ['ログインに失敗', 'パスワードが間違', '認証に失敗', 'error', 'エラー', 'ログイン画面', 'パスワード', 'メールアドレス'];
+	
+	const hasSuccess = successPatterns.some(pattern => 
+		loginResponseText.toLowerCase().includes(pattern.toLowerCase())
+	);
+	const hasFailure = failurePatterns.some(pattern => 
+		loginResponseText.toLowerCase().includes(pattern.toLowerCase())
+	);
+	
+	console.log('🎯 Pattern matching:', { 
+		hasSuccess, 
+		hasFailure,
+		foundSuccess: successPatterns.filter(p => loginResponseText.toLowerCase().includes(p.toLowerCase())),
+		foundFailure: failurePatterns.filter(p => loginResponseText.toLowerCase().includes(p.toLowerCase()))
+	});
+	
+	if (hasSuccess && !hasFailure) {
+		success = true;
+		method = 'content';
+	}
+	}
+    
+    // Cookie判定
+    if (!success && allCookies.length > loginPageCookies.length) {
+      const sessionPatterns = ['session', 'auth', 'login', 'token', 'user'];
+      const hasSessionCookie = sessionPatterns.some(pattern =>
+        allCookies.toLowerCase().includes(pattern)
+      );
+      
+      if (hasSessionCookie) {
+        success = true;
+        method = 'cookie';
+      }
+    }
+
+	// より緩い成功判定（最後の手段）
+	if (!success && loginResponse.status === 200) {
+	const loginResponseText = await loginResponse.text();
+	// ログインページの特徴がない場合は成功とみなす
+	if (!loginResponseText.includes('パスワード') && 
+		!loginResponseText.includes('ログイン') && 
+		loginResponseText.length > 1000) {
+		success = true;
+		method = 'fallback';
+		console.log('🎲 Using fallback success detection - no login indicators found');
+	}
+	}
+    
+    console.log(`🔐 Login result: ${success ? '✅ SUCCESS' : '❌ FAILED'} (${method})`);
+    
+    return {
+      success,
+      cookies: allCookies,
+      method,
+      error: success ? null : 'Login failed - no success indicators found'
+    };
+    
+  } catch (error) {
+    console.error('Login error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// 認証付き詳細ページスクレイピング
+async function scrapeDetailPageWithAuth(detailUrl, cookies, env) {
+  try {
+    console.log(`🔍 Accessing detail page: ${detailUrl}`);
+    console.log(`🍪 Using cookies (length: ${cookies.length})`);
+    
+    const response = await fetch(detailUrl, {
+      headers: {
+        'Cookie': cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.comisapolive.com/', // より具体的なReferer
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      }
+    });
+    
+    console.log(`📄 Detail response: ${response.status} -> ${response.url}`);
+    
+    if (!response.ok) {
+      console.error(`Failed to fetch detail page: ${response.status}`);
+      return { error: `HTTP ${response.status}` };
+    }
+    
+    const html = await response.text();
+    
+    // ログインが必要かチェック
+    if (html.includes('ログイン') || response.url.includes('login')) {
+      console.log('⚠️ Authentication expired, detail page requires login');
+      return { requiresLogin: true };
+    }
+    
+    const detailInfo = {};
+    
+    // 全ての詳細情報を抽出
+    try {
+      // カテゴリ：liverProf_tag
+      const categories = extractTextFromClass(html, 'liverProf_tag');
+      if (categories.length > 0) detailInfo.categories = categories;
+      
+      // ライバー名：liverProf_name
+      const detailName = extractTextFromClass(html, 'liverProf_name');
+      if (detailName.length > 0) detailInfo.detailName = detailName[0];
+      
+      // フォロワー数：liverProf_follwer
+      const detailFollowers = extractTextFromClass(html, 'liverProf_follwer');
+      if (detailFollowers.length > 0) detailInfo.detailFollowers = detailFollowers[0];
+      
+      // プロフィール画像：liverImage_views
+      const profileImages = await extractImagesFromClass(html, 'liverImage_views', env);
+      if (profileImages.length > 0) detailInfo.profileImages = profileImages;
+      
+      // コラボ配信OK：liverProf_collaboOK
+      const collaboOK = extractTextFromClass(html, 'liverProf_collaboOK');
+      if (collaboOK.length > 0) detailInfo.collaboOK = collaboOK[0];
+      
+      // コラボ配信NG：liverProf_collaboNG
+      const collaboNG = extractTextFromClass(html, 'liverProf_collaboNG');
+      if (collaboNG.length > 0) detailInfo.collaboNG = collaboNG[0];
+      
+      // 各媒体リンク：liverProf_info
+      const mediaLinks = extractLinksFromClass(html, 'liverProf_info');
+      if (mediaLinks.length > 0) detailInfo.mediaLinks = mediaLinks;
+      
+      // プロフィール情報（性別、配信歴、生年月日）：liverProf_prof
+      const profileTexts = extractTextFromClass(html, 'liverProf_prof');
+      if (profileTexts.length > 0) {
+        detailInfo.profileInfo = parseProfileInfo(profileTexts);
+        detailInfo.rawProfileTexts = profileTexts; // デバッグ用
+      }
+      
+      // イベント情報：liverEvent_scheduleTxt
+      const eventInfo = extractTextFromClass(html, 'liverEvent_scheduleTxt');
+      if (eventInfo.length > 0) detailInfo.eventInfo = eventInfo;
+      
+      // ライバーコメント：liverComment_body
+      const comments = extractTextFromClass(html, 'liverComment_body');
+      if (comments.length > 0) detailInfo.comments = comments;
+      
+      // 配信媒体・URL・登録者数：schedules_name, schedules_id, schedules_follwer
+      const scheduleInfo = extractScheduleInfo(html);
+      if (scheduleInfo.length > 0) detailInfo.schedules = scheduleInfo;
+      
+      // 性別データの特別検索
+      const genderSearch = findGenderData(html);
+      if (genderSearch.found) {
+        detailInfo.genderSearchResults = genderSearch;
+        if (!detailInfo.profileInfo) detailInfo.profileInfo = {};
+        if (!detailInfo.profileInfo.gender && genderSearch.bestMatch) {
+          detailInfo.profileInfo.gender = genderSearch.bestMatch;
+        }
+      }
+      
+    } catch (extractError) {
+      console.error('Detail extraction error:', extractError);
+      detailInfo.extractionError = extractError.message;
+    }
+    
+    return detailInfo;
+    
+  } catch (error) {
+    console.error(`Error scraping detail page ${detailUrl}:`, error);
+    return { error: error.message };
+  }
+}
+
+// テスト用単一ライバー抽出
+async function testSingleLiverWithGender(env) {
+  const result = {
+    step: '',
+    success: false,
+    error: null,
+    liverData: null,
+    genderFound: false
+  };
+  
+  try {
+    result.step = 'Performing login';
+    const loginResult = await performRobustLogin(env);
+    
+    if (!loginResult.success) {
+      throw new Error(`Login failed: ${loginResult.error}`);
+    }
+    
+    console.log('Test: Login successful, cookies:', loginResult.cookies);
+    
+    result.step = 'Fetching list page with authentication';
+    
+    // ✅ 認証付きで一覧ページを取得（scheduled処理と同じ方法）
+    const listResponse = await fetch('https://www.comisapolive.com/liver/list/?q=&collaboration=&achievements=&rank=&app=&follower1=&follower2=&since=&gender=&age1=&age2=&regist=&search=1', {
+      headers: {
+        'Cookie': loginResult.cookies,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        'Referer': 'https://www.comisapolive.com/'
+      }
+    });
+    
+    const listHtml = await listResponse.text();
+    console.log('Test: List page response status:', listResponse.status);
+    console.log('Test: List page HTML length:', listHtml.length);
+    console.log('Test: List page contains liver class:', listHtml.includes('livers_item'));
+    
+    const pageData = await parseHTMLPageWithDetails(listHtml, env, 1);
+    console.log('Test: Parsed liver count:', pageData.length);
+    
+    if (pageData.length === 0) {
+      throw new Error('No liver data found in list page');
+    }
+    
+    result.step = 'Extracting detail information';
+    const targetLiver = pageData[0];
+    console.log('Test: Target liver:', targetLiver.name, targetLiver.detailUrl);
+    
+    // ✅ 実際の詳細ページURL（/liver/detail/ID/ 形式）
+    const actualDetailUrl = `https://www.comisapolive.com/liver/detail/${targetLiver.originalId}/`;
+    console.log('Test: Accessing detail URL:', actualDetailUrl);
+    
+    const detailInfo = await scrapeDetailPageWithAuth(actualDetailUrl, loginResult.cookies, env);
+    console.log('Test: Detail info keys:', Object.keys(detailInfo));
+    
+    Object.assign(targetLiver, detailInfo);
+    
+    result.liverData = targetLiver;
+    result.genderFound = !!(detailInfo.profileInfo && detailInfo.profileInfo.gender);
+    result.success = true;
+    result.step = 'Complete';
+    
+  } catch (error) {
+    console.error('Test error:', error);
+    result.error = error.message;
+  }
+  
+  return new Response(JSON.stringify(result, null, 2), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// 詳細ページのHTMLを解析（詳細リンク付き）
+// 🔧 修正版: 実際のサイト構造に対応したHTMLパース処理
+async function parseHTMLPageWithDetails(html, env, pageNumber) {
+  const livers = [];
+  
+  console.log(`🔍 Enhanced parsing page ${pageNumber}, HTML length: ${html.length}`);
+  
+  // 🆕 実際のサイト構造に基づいた正しいパターン
+  
+  // 1. まず /liver/detail/ リンクを全て抽出
+  const detailLinks = [];
+  const linkPattern = /<a[^>]*href="(\/liver\/detail\/(\d+)\/?)"/g;
+  let linkMatch;
+  
+  while ((linkMatch = linkPattern.exec(html)) !== null) {
+    detailLinks.push({
+      path: linkMatch[1],
+      id: linkMatch[2],
+      fullUrl: `https://www.comisapolive.com/liver/detail/${linkMatch[2]}/`
+    });
+  }
+  
+  console.log(`🔗 Found ${detailLinks.length} detail links`);
+  
+  // 2. user_files_thumbnail画像からライバー情報を抽出
+  const imagePattern = /<img src="\/user_files_thumbnail\/(\d+)\/[^"]*" alt="([^"]*)"[^>]*>/g;
+  const foundLivers = [];
+  let imageMatch;
+  
+  while ((imageMatch = imagePattern.exec(html)) !== null) {
+    const [fullMatch, id, name] = imageMatch;
+    
+    console.log(`📸 Found liver image: ${name} (ID: ${id})`);
+    
+    // 対応する詳細リンクを探す
+    const correspondingLink = detailLinks.find(link => link.id === id);
+    
+    if (correspondingLink) {
+      foundLivers.push({
+        id: id,
+        name: name.trim(),
+        imageUrl: fullMatch.match(/src="([^"]*)"/)[1],
+        detailUrl: correspondingLink.fullUrl
+      });
+    }
+  }
+  
+  // 3. より詳細な情報抽出（フォロワー数など）
+  // livers_item要素から詳細情報を抽出
+  const itemPattern = /<div[^>]*class="[^"]*livers_item[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
+  let itemMatch;
+  let itemIndex = 0;
+  
+  while ((itemMatch = itemPattern.exec(html)) !== null && itemIndex < foundLivers.length) {
+    const itemHtml = itemMatch[1];
+    const liver = foundLivers[itemIndex];
+    
+    if (liver) {
+      // フォロワー数を抽出
+      const followerMatch = itemHtml.match(/<dd[^>]*>([^<]*)<\/dd>/);
+      if (followerMatch) {
+        const followerText = followerMatch[1].trim();
+        liver.followers = parseInt(followerText.replace(/[,\s]/g, '')) || 0;
+      }
+      
+      // プラットフォーム情報を抽出
+      const platformMatch = itemHtml.match(/<dt[^>]*>([^<]*)<\/dt>/);
+      if (platformMatch) {
+        liver.platform = platformMatch[1].replace('フォロワー', '').trim();
+      }
+      
+      // ライバー名の再確認（livers_name クラスから）
+      const nameMatch = itemHtml.match(/<p[^>]*class="[^"]*livers_name[^"]*"[^>]*>([^<]*)<\/p>/);
+      if (nameMatch && nameMatch[1].trim()) {
+        liver.name = nameMatch[1].trim();
+      }
+    }
+    
+    itemIndex++;
+  }
+  
+  console.log(`📊 Detailed parsing results: ${foundLivers.length} livers with details`);
+  
+  // 4. 最終的なライバーオブジェクトを作成
+  for (const liver of foundLivers) {
+    const liverId = generateId(liver.name, pageNumber);
+    const fullImageUrl = liver.imageUrl.startsWith('/') 
+      ? `https://www.comisapolive.com${liver.imageUrl}` 
+      : liver.imageUrl;
+    
+    // 基本画像の保存
+    await saveImageIfChanged(env, liverId, fullImageUrl);
+    
+    livers.push({
+      id: liverId,
+      originalId: liver.id,
+      name: liver.name,
+      platform: liver.platform || 'Unknown',
+      followers: liver.followers || 0,
+      imageUrl: `/api/images/${liverId}.jpg`,
+      detailUrl: liver.detailUrl,
+      page: pageNumber,
+      updatedAt: Date.now()
+    });
+    
+    console.log(`✅ Processed liver: ${liver.name} (${liver.platform}: ${liver.followers} followers)`);
+  }
+  
+  console.log(`✅ Page ${pageNumber} final result: ${livers.length} livers processed`);
+  return livers;
+}
+
+// 性別データの包括的検索
+function findGenderData(html) {
+  const genderInfo = {
+    found: false,
+    matches: [],
+    methods: [],
+    bestMatch: null
+  };
+  
+  try {
+    // 方法1: 直接的な性別表記を検索
+    const directPatterns = [
+      /性別[:\s]*([^\s<\n]{1,10})/gi,
+      /Gender[:\s]*([^\s<\n]{1,10})/gi,
+      /(男性|女性|その他|male|female|other)/gi
+    ];
+    
+    directPatterns.forEach((pattern, index) => {
+      const matches = html.match(pattern);
+      if (matches) {
+        genderInfo.matches.push(...matches);
+        genderInfo.methods.push(`direct_pattern_${index + 1}`);
+        genderInfo.found = true;
+        
+        // 最初の明確な性別を保存
+        if (!genderInfo.bestMatch) {
+          const cleanMatch = matches[0].replace(/性別[:\s]*/, '').replace(/Gender[:\s]*/, '').trim();
+          if (cleanMatch.match(/(男性|女性|その他)/)) {
+            genderInfo.bestMatch = cleanMatch;
+          }
+        }
+      }
+    });
+    
+    // 方法2: プロフィールクラス内の詳細検索
+    const profPattern = /class="[^"]*liverProf_prof[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/gi;
+    let profMatch;
+    
+    while ((profMatch = profPattern.exec(html)) !== null) {
+      const profContent = profMatch[1];
+      const genderInProf = profContent.match(/(性別|男性|女性|Gender)/gi);
+      if (genderInProf) {
+        genderInfo.matches.push(...genderInProf);
+        genderInfo.methods.push('profile_class_search');
+        genderInfo.found = true;
+        genderInfo.profileContext = profContent.replace(/<[^>]*>/g, '').trim();
+      }
+    }
+    
+  } catch (error) {
+    genderInfo.error = error.message;
+  }
+  
+  return genderInfo;
+}
+
+// ヘルパー関数群（既存のものを再利用）
+function extractTextFromClass(html, className) {
+  const results = [];
+  const patterns = [
+    new RegExp(`<[^>]*class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\/[^>]+>`, 'gi'),
+    new RegExp(`<div[^>]*class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\/div>`, 'gi'),
+    new RegExp(`<span[^>]*class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\/span>`, 'gi'),
+    new RegExp(`<p[^>]*class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\/p>`, 'gi')
+  ];
+  
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+      let text = match[1]
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      if (text && text.length > 0) {
+        results.push(text);
+      }
+    }
+  }
+  
+  return [...new Set(results)];
+}
+
+async function extractImagesFromClass(html, className, env) {
+  const results = [];
+  const pattern = new RegExp(`<[^>]*class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\/[^>]+>`, 'g');
+  let match;
+  let imageIndex = 0;
+  
+  while ((match = pattern.exec(html)) !== null) {
+    const imgPattern = /<img[^>]*src="([^"]*)"[^>]*>/g;
+    let imgMatch;
+    
+    while ((imgMatch = imgPattern.exec(match[1])) !== null) {
+      const imageUrl = imgMatch[1];
+      const fullImageUrl = imageUrl.startsWith('/') 
+        ? `https://www.comisapolive.com${imageUrl}` 
+        : imageUrl;
+      
+      const imageId = `profile_${imageIndex}_${Date.now()}`;
+      await saveImageIfChanged(env, imageId, fullImageUrl);
+      
+      results.push({
+        url: `/api/images/${imageId}.jpg`,
+        originalUrl: fullImageUrl
+      });
+      
+      imageIndex++;
+    }
+  }
+  
+  return results;
+}
+
+function parseProfileInfo(profileTexts) {
+  const info = {};
+  
+  for (const text of profileTexts) {
+    const lowerText = text.toLowerCase();
+    
+    // より柔軟な性別判定
+    if (lowerText.includes('性別') || lowerText.includes('男性') || lowerText.includes('女性') || 
+        lowerText.includes('gender') || lowerText.includes('male') || lowerText.includes('female')) {
+      info.gender = text;
+    } else if (lowerText.includes('配信歴') || (lowerText.includes('年') && lowerText.includes('ヶ月'))) {
+      info.streamingHistory = text;
+    } else if (lowerText.includes('生年月日') || (lowerText.includes('月') && lowerText.includes('日'))) {
+      info.birthday = text;
+    }
+  }
+  
+  return info;
+}
+
+function extractScheduleInfo(html) {
+  const schedules = [];
+  
+  // schedules_name, schedules_id, schedules_follwer を同時に抽出
+  const schedulePattern = /<[^>]*class="[^"]*schedules_name[^"]*"[^>]*>([^<]*)<\/[^>]*>[\s\S]*?<[^>]*class="[^"]*schedules_id[^"]*"[^>]*href="([^"]*)"[^>]*>[\s\S]*?<[^>]*class="[^"]*schedules_follwer[^"]*"[^>]*>([^<]*)<\/[^>]*>/g;
+  let match;
+  
+  while ((match = schedulePattern.exec(html)) !== null) {
+    schedules.push({
+      name: match[1].trim(),
+      url: match[2],
+      followers: match[3].trim()
+    });
+  }
+  
+  // 個別に抽出する方法も併用
+  if (schedules.length === 0) {
+    const names = extractTextFromClass(html, 'schedules_name');
+    const urls = extractLinksFromClass(html, 'schedules_id');
+    const followers = extractTextFromClass(html, 'schedules_follwer');
+    
+    const maxLength = Math.max(names.length, urls.length, followers.length);
+    for (let i = 0; i < maxLength; i++) {
+      schedules.push({
+        name: names[i] || '',
+        url: urls[i]?.url || '',
+        followers: followers[i] || ''
+      });
+    }
+  }
+  
+  return schedules;
+}
+
+function getMaxPages(html) {
+  const pagePattern = /[?&]page=(\d+)/g;
+  let maxPage = 1;
+  let match;
+  
+  while ((match = pagePattern.exec(html)) !== null) {
+    const pageNum = parseInt(match[1]);
+    if (pageNum > maxPage) {
+      maxPage = pageNum;
+    }
+  }
+  
+  // より確実な方法：「次へ」ボタンや最後のページリンクを探す
+  const nextPagePattern = /<a[^>]*href="[^"]*[?&]page=(\d+)"[^>]*>(?:次|&gt;|»)/i;
+  const nextMatch = nextPagePattern.exec(html);
+  if (nextMatch) {
+    const nextPage = parseInt(nextMatch[1]);
+    maxPage = Math.max(maxPage, nextPage);
+  }
+  
+  return maxPage;
+}
+
+async function saveImageIfChanged(env, liverId, imageUrl) {
+  try {
+    const headResponse = await fetch(imageUrl, { method: 'HEAD' });
+    if (!headResponse.ok) return;
+    
+    const lastModified = headResponse.headers.get('last-modified') || '';
+    const contentLength = headResponse.headers.get('content-length') || '';
+    const currentHash = generateHash(lastModified + contentLength + imageUrl);
+    
+    const storedHash = env.IMAGE_HASHES ? await env.IMAGE_HASHES.get(`hash_${liverId}`) : null;
+    
+    if (currentHash !== storedHash) {
+      const imageResponse = await fetch(imageUrl);
+      if (imageResponse.ok) {
+        const imageBuffer = await imageResponse.arrayBuffer();
+        
+        if (env.IMAGES) {
+          await env.IMAGES.put(`${liverId}.jpg`, imageBuffer, {
+            httpMetadata: { contentType: 'image/jpeg' }
+          });
+        }
+        
+        if (env.IMAGE_HASHES) {
+          await env.IMAGE_HASHES.put(`hash_${liverId}`, currentHash);
+        }
+        console.log(`📸 Updated image for ${liverId}`);
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to process image for ${liverId}:`, error);
+  }
+}
+
+function generateId(name, pageNumber) {
+  const baseName = name.toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, '_')
+    .substring(0, 40);
+  
+  return `${baseName}_p${pageNumber}_${Date.now().toString().slice(-6)}`;
+}
+
+function generateHash(data) {
+  let hash = 0;
+  if (data.length === 0) return hash.toString();
+  for (let i = 0; i < data.length; i++) {
+    const char = data.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString();
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function extractCSRFToken(html) {
+  let match = html.match(/<meta[^>]*name=["\']csrf-token["\'][^>]*content=["\']([^"\']*)["\'][^>]*>/i);
+  if (match) return match[1];
+  
+  match = html.match(/<meta[^>]*content=["\']([^"\']*)["\'][^>]*name=["\']csrf-token["\'][^>]*>/i);
+  if (match) return match[1];
+  
+  match = html.match(/<input[^>]*name=["\']csrf_token["\'][^>]*value=["\']([^"\']*)["\'][^>]*>/i);
+  if (match) return match[1];
+  
+  match = html.match(/<input[^>]*name=["\']_token["\'][^>]*value=["\']([^"\']*)["\'][^>]*>/i);
+  if (match) return match[1];
+  
+  return null;
+}
+
+function extractHiddenFields(html) {
+  const hiddenFields = {};
+  const pattern = /<input[^>]*type=["\']hidden["\'][^>]*>/gi;
+  let match;
+  
+  while ((match = pattern.exec(html)) !== null) {
+    const input = match[0];
+    const nameMatch = input.match(/name=["\']([^"\']*)["\']/i);
+    const valueMatch = input.match(/value=["\']([^"\']*)["\']/i);
+    
+    if (nameMatch && valueMatch) {
+      hiddenFields[nameMatch[1]] = valueMatch[1];
+    }
+  }
+  
+  return hiddenFields;
+}
+
+function extractFormAction(html) {
+  const match = html.match(/<form[^>]*action=["\']([^"\']*)["\'][^>]*>/i);
+  if (match) {
+    const action = match[1];
+    return action.startsWith('/') ? `https://www.comisapolive.com${action}` : action;
+  }
+  return null;
+}
+
+function combineCookies(cookies1, cookies2) {
+  console.log('🍪 Raw cookies1:', cookies1);
+  console.log('🍪 Raw cookies2:', cookies2);
+  
+  let finalCookies = '';
+  
+  if (cookies2 && cookies2.includes('SESS_PUBLISH')) {
+    // cookies2から最新のSESS_PUBLISHを抽出
+    const sessMatches = cookies2.match(/SESS_PUBLISH=([^;,]+)/g);
+    if (sessMatches && sessMatches.length > 0) {
+      // 最後のマッチを使用
+      finalCookies = sessMatches[sessMatches.length - 1];
+      console.log('🍪 Using latest SESS_PUBLISH:', finalCookies);
+    }
+  } else if (cookies1 && cookies1.includes('SESS_PUBLISH')) {
+    // cookies1から抽出
+    const sessMatch = cookies1.match(/SESS_PUBLISH=([^;,]+)/);
+    if (sessMatch) {
+      finalCookies = `SESS_PUBLISH=${sessMatch[1]}`;
+      console.log('🍪 Using cookies1 SESS_PUBLISH:', finalCookies);
+    }
+  }
+  
+  return finalCookies;
+}
+
+function extractLinksFromClass(html, className) {
+  const results = [];
+  const pattern = new RegExp(`<[^>]*class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\/[^>]+>`, 'g');
+  let match;
+  
+  while ((match = pattern.exec(html)) !== null) {
+    const linkPattern = /<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g;
+    let linkMatch;
+    
+    while ((linkMatch = linkPattern.exec(match[1])) !== null) {
+      results.push({
+        url: linkMatch[1],
+        text: linkMatch[2].trim()
+      });
+    }
+  }
+
+  // 永続的な画像保存処理
+async function saveImagePersistently(env, liverId, imageBuffer, contentType) {
+  try {
+    const imageId = `${liverId}.jpg`;
+    
+    // より永続的な保存オプション
+    await env.IMAGES.put(imageId, imageBuffer, {
+      httpMetadata: { 
+        contentType: contentType || 'image/jpeg',
+        cacheControl: 'public, max-age=31536000', // 1年間キャッシュ
+      },
+      customMetadata: {
+        'liver-id': liverId,
+        'upload-time': new Date().toISOString(),
+        'source': 'auto-scraper',
+        'permanent': 'true'
+      }
+    });
+    
+    // KVにも画像の存在を記録（バックアップ）
+    if (env.IMAGE_HASHES) {
+      await env.IMAGE_HASHES.put(`image_${liverId}`, JSON.stringify({
+        imageId: imageId,
+        uploadTime: new Date().toISOString(),
+        size: imageBuffer.byteLength,
+        contentType: contentType || 'image/jpeg',
+        permanent: true
+      }));
+    }
+    
+    console.log(`💾 Permanently saved image: ${imageId} (${imageBuffer.byteLength} bytes)`);
+    return true;
+    
+  } catch (error) {
+    console.error(`❌ Failed to save image permanently:`, error);
+    return false;
+  }
+}
+
+// 画像の存在確認（永続性チェック付き）
+async function checkImageExists(env, liverId) {
+  try {
+    const imageId = `${liverId}.jpg`;
+    
+    // R2で直接確認
+    const r2Object = await env.IMAGES.get(imageId);
+    if (r2Object) {
+      console.log(`✅ Image exists in R2: ${imageId}`);
+      return true;
+    }
+    
+    // KVでバックアップ確認
+    if (env.IMAGE_HASHES) {
+      const backupInfo = await env.IMAGE_HASHES.get(`image_${liverId}`);
+      if (backupInfo) {
+        console.log(`📋 Image record exists in KV: ${imageId}`);
+        return false; // R2にはないがKVに記録がある（要再取得）
+      }
+    }
+    
+    return false;
+    
+  } catch (error) {
+    console.error(`❌ Error checking image existence:`, error);
+    return false;
+  }
+}
+  
+  return results;
+}
