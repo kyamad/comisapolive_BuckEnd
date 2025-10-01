@@ -17,3 +17,12 @@ id = "315e8927f3284e969d9657c0e97bbab8"
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "liver-images"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "4ad1e2f3d0a240b3883bfb8e36edd398"
+
+[[d1_databases]]
+binding = "REVIEWS_DB"
+database_name = "liver-reviews-db"
+database_id = "49bebec8-757d-4247-a783-edc99ac0d57b"
