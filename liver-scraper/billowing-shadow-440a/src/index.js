@@ -4051,17 +4051,49 @@ export default {
       }
     }
     
+    // 口コミAPI
+    if (url.pathname.startsWith('/api/reviews')) {
+      const { postReview, getReviews, getReviewStats, deleteReview } = await import('./reviews-api.js');
+
+      // POST /api/reviews - 口コミ投稿
+      if (request.method === 'POST' && url.pathname === '/api/reviews') {
+        return await postReview(request, env);
+      }
+
+      // GET /api/reviews/stats/:liverId - 平均評価取得
+      if (request.method === 'GET' && url.pathname.startsWith('/api/reviews/stats/')) {
+        const liverId = url.pathname.split('/').pop();
+        return await getReviewStats(liverId, env);
+      }
+
+      // GET /api/reviews/:liverId - 口コミ一覧取得
+      if (request.method === 'GET' && url.pathname.startsWith('/api/reviews/')) {
+        const liverId = url.pathname.split('/').pop();
+        return await getReviews(liverId, env);
+      }
+
+      // DELETE /api/reviews/:reviewId - 口コミ削除（管理用）
+      if (request.method === 'DELETE' && url.pathname.startsWith('/api/reviews/')) {
+        const reviewId = url.pathname.split('/').pop();
+        return await deleteReview(reviewId, request, env);
+      }
+
+      return new Response(JSON.stringify({
+        error: 'Method not allowed'
+      }), { status: 405, headers: { 'Content-Type': 'application/json' } });
+    }
+
     // 画像API
     if (url.pathname.startsWith('/api/images/')) {
       const imageId = url.pathname.split('/').pop();
       const image = env.IMAGES ? await env.IMAGES.get(imageId) : null;
-      
+
       if (!image) {
         return new Response('Image not found', { status: 404 });
       }
-      
+
       return new Response(image.body, {
-        headers: { 
+        headers: {
           'Content-Type': 'image/jpeg',
           'Cache-Control': 'max-age=86400',
           ...corsHeaders
