@@ -1,0 +1,12 @@
+0 verbose cli /opt/homebrew/Cellar/node/24.6.0/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js
+1 info using npm@11.5.1
+2 info using node@v24.6.0
+3 silly config load:file:/opt/homebrew/lib/node_modules/npm/npmrc
+4 silly config load:file:/Applications/develop/comisapoapp/liver-scraper/billowing-shadow-440a/.npmrc
+5 silly config load:file:/Applications/develop/comisapoapp/.npmrc
+6 silly config load:file:/opt/homebrew/etc/npmrc
+7 verbose title npm exec wrangler deploy
+8 verbose argv "exec" "--" "wrangler" "deploy"
+9 verbose logfile logs-max:10 dir:/Applications/develop/comisapoapp/.npm/_logs/2025-10-07T05_16_53_540Z-
+10 verbose logfile /Applications/develop/comisapoapp/.npm/_logs/2025-10-07T05_16_53_540Z-debug-0.log
+11 silly logfile done cleaning log files

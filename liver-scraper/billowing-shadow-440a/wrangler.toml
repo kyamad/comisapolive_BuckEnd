@@ -18,6 +18,9 @@ id = "315e8927f3284e969d9657c0e97bbab8"
 binding = "IMAGES"
 bucket_name = "liver-images"
 
+[vars]
+WORKER_AUTH_TOKEN = "liver-scraper-secure-token-2024"
+
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
 id = "4ad1e2f3d0a240b3883bfb8e36edd398"

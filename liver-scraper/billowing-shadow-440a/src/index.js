@@ -444,8 +444,8 @@ export default {
     // CORS設定
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
     
     if (request.method === 'OPTIONS') {
@@ -3997,49 +3997,148 @@ export default {
       }
     }
 
-    // ライバー一覧API - 手動スクレイピングと完全に同じロジックを使用
+    // ライバー一覧API - 既存データを即時返却
     if (url.pathname === '/api/livers') {
       try {
-        console.log(`🚀 API_MANUAL_SCRAPE_MIRROR_V${DEPLOYMENT_VERSION}`);
+        const unifiedData = await readUnifiedData(env);
 
-        // 手動スクレイピングと完全に同じ処理を実行
-        const { scrapeBasicDataOnly, integrateWithExistingDetails, generateHash } = await import('./main-scraper.js');
-        const basicLiverData = await scrapeBasicDataOnly(env);
+        if (unifiedData && Array.isArray(unifiedData.data)) {
+          const dataArray = unifiedData.data;
+          const withDetailsCount = dataArray.filter(item => item.hasDetails === true || (item.categories && item.categories.length > 0)).length;
+          const pendingCount = dataArray.length - withDetailsCount;
 
-        console.log('🔄 Integrating with existing details in API endpoint...');
+          return new Response(JSON.stringify({
+            success: true,
+            total: dataArray.length,
+            data: dataArray,
+            timestamp: unifiedData.timestamp || new Date().toISOString(),
+            lastUpdate: unifiedData.lastUpdate || new Date().toISOString(),
+            stats: {
+              withDetails: withDetailsCount,
+              pending: pendingCount,
+              dataSource: unifiedData.dataSource || 'unified'
+            }
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders
+            }
+          });
+        }
 
-        // 統合保護機能を使用して詳細データを保護（手動スクレイピングと同じ）
-        const integratedResult = await integrateWithExistingDetails(env, basicLiverData);
-        const allLiverData = integratedResult.data;
+        const basicDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_basic_data') : null;
+        if (basicDataStr) {
+          const basicData = JSON.parse(basicDataStr);
+          const basicArray = basicData.data || [];
 
-        const response = {
-          data: allLiverData,
-          total: allLiverData.length,
-          timestamp: new Date().toISOString(),
-          stats: {
-            withDetails: allLiverData.filter(item => item.hasDetails).length,
-            pending: 0
-          },
-          message: "Manual scraping completed",
-          totalLivers: allLiverData.length,
-          updated: false,
-          sampleLiver: allLiverData.length > 0 ? allLiverData[0] : null,
-          allData: allLiverData
-        };
+          return new Response(JSON.stringify({
+            success: true,
+            total: basicArray.length,
+            data: basicArray.map(liver => ({
+              ...liver,
+              hasDetails: false,
+              categories: [],
+              streamingUrls: []
+            })),
+            timestamp: basicData.timestamp || new Date().toISOString(),
+            lastUpdate: basicData.lastUpdate || new Date().toISOString(),
+            stats: {
+              withDetails: 0,
+              pending: basicArray.length,
+              dataSource: 'basic_fallback'
+            }
+          }), {
+            headers: {
+              'Content-Type': 'application/json',
+              ...corsHeaders
+            }
+          });
+        }
 
-        return new Response(JSON.stringify(response), {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'No data available'
+        }), {
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'max-age=300',
             ...corsHeaders
           }
         });
 
       } catch (error) {
-        console.error('❌ API error:', error);
+        console.error('❌ API cached response error:', error);
         return new Response(JSON.stringify({
-          data: [],
-          total: 0,
+          success: false,
+          error: error.message
+        }), {
+          status: 500,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          }
+        });
+      }
+    }
+
+    // 手動リフレッシュエンドポイント（認証必須）
+    if (url.pathname === '/api/livers/refresh') {
+      if (request.method !== 'POST') {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Method not allowed'
+        }), {
+          status: 405,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          }
+        });
+      }
+
+      const authHeader = request.headers.get('Authorization');
+      const expectedToken = env.WORKER_AUTH_TOKEN || 'default-token';
+      if (authHeader !== `Bearer ${expectedToken}`) {
+        return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
+          status: 401,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          }
+        });
+      }
+
+      try {
+        console.log('🚀 Manual refresh triggered via /api/livers/refresh');
+        const { scrapeBasicDataOnly, integrateWithExistingDetails } = await import('./main-scraper.js');
+        const basicLiverData = await scrapeBasicDataOnly(env);
+        const integratedResult = await integrateWithExistingDetails(env, basicLiverData);
+
+        await writeUnifiedData(env, integratedResult.data);
+
+        const integrationStats = integratedResult.integration || {};
+        const withDetailsCount = integrationStats.withDetails || integratedResult.data.filter(item => item.hasDetails).length;
+        const pendingCount = integrationStats.pending || (integratedResult.data.length - withDetailsCount);
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Manual refresh completed',
+          total: integratedResult.data.length,
+          timestamp: new Date().toISOString(),
+          stats: {
+            withDetails: withDetailsCount,
+            pending: pendingCount
+          }
+        }), {
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders
+          }
+        });
+
+      } catch (error) {
+        console.error('❌ Manual refresh failed:', error);
+        return new Response(JSON.stringify({
+          success: false,
           error: error.message
         }), {
           status: 500,

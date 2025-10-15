@@ -2075,12 +2075,11 @@ async function processSmallBatch(env, livers, maxItems = 3) {
     }
     try {
       const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, loginResult.userAgent, env, loginResult);
-      
-      if (detailInfo) {
-        // ユニークIDと画像URLを生成
-        const uniqueId = generateUniqueId(liver);
-        const imageUrl = `/api/images/${liver.originalId}.jpg`;
-        
+      const uniqueId = generateUniqueId(liver);
+      const imageUrl = `/api/images/${liver.originalId}.jpg`;
+      const hasValidDetails = detailInfo && detailInfo.success === true && detailInfo.details;
+
+      if (hasValidDetails) {
         const detailedLiver = {
           ...liver,
           ...detailInfo,
@@ -2090,23 +2089,26 @@ async function processSmallBatch(env, livers, maxItems = 3) {
           hasDetails: true,
           detailScrapedAt: new Date().toISOString()
         };
-        
+
         processed.completed.push(detailedLiver);
         successCount++;
         console.log(`✅ ${liver.name} - Details collected (ID: ${uniqueId})`);
       } else {
-        // 詳細情報がない場合もユニークIDを生成
-        const uniqueId = generateUniqueId(liver);
-        const imageUrl = `/api/images/${liver.originalId}.jpg`;
-        
         processed.completed.push({
           ...liver,
+          ...(detailInfo || {}),
           id: uniqueId,
           imageUrl: imageUrl,
           updatedAt: Date.now(),
           hasDetails: false
         });
-        console.log(`⚠️ ${liver.name} - No details found (ID: ${uniqueId})`);
+
+        const reason = detailInfo?.requiresLogin
+          ? 'requires login'
+          : detailInfo?.error
+            ? `error: ${detailInfo.error}`
+            : 'no details found';
+        console.log(`⚠️ ${liver.name} - No details stored (${reason}) (ID: ${uniqueId})`);
       }
       
       // リクエスト間の待機を短縮してセッション維持
