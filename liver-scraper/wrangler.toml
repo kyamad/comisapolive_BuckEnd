@@ -1,31 +1,28 @@
 name = "liver-scraper-main"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
-account_id = "4cf5abc5b44aacd9b0776ac001d9826a"
+account_id = "e610573ff233746b39a509deadc4ee36"
 
 [triggers]
 crons = ["0 * * * *"]
 
 [[kv_namespaces]]
 binding = "LIVER_DATA"
-id = "4adf452d17b14628a67d1bbe183d6b53"
+id = "a9658ebf09ed49bba4ea6b35af67f9eb"
 
 [[kv_namespaces]]
 binding = "IMAGE_HASHES"
-id = "315e8927f3284e969d9657c0e97bbab8"
+id = "faaeff9c9c194751bc1e20549fdb3161"
 
 [[r2_buckets]]
 binding = "IMAGES"
 bucket_name = "liver-images"
 
-[vars]
-WORKER_AUTH_TOKEN = "liver-scraper-secure-token-2024"
-
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
-id = "4ad1e2f3d0a240b3883bfb8e36edd398"
+id = "49596f0e6e73472aa48904f16a55ec46"
 
 [[d1_databases]]
 binding = "REVIEWS_DB"
 database_name = "liver-reviews-db"
-database_id = "49bebec8-757d-4247-a783-edc99ac0d57b"
+database_id = "d6629c6c-3a67-4538-beda-01d18b296af0"

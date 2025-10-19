@@ -887,6 +887,36 @@ function extractFormAction(html) {
 }
 
 // 既存の詳細データと基本データを統合してlatest_dataを更新
+async function getLastKnownGoodData(env) {
+  const fallbackKeys = [
+    'latest_integrated_backup',
+    'latest_integrated_data',
+    'latest_data'
+  ];
+
+  for (const key of fallbackKeys) {
+    try {
+      const raw = await env.LIVER_DATA?.get(key);
+      if (!raw) continue;
+
+      const parsed = JSON.parse(raw);
+      const withDetails = parsed?.integration?.withDetails ?? 0;
+
+      if (Array.isArray(parsed?.data) && parsed.data.length > 0 && withDetails > 0) {
+        return { key, raw, parsed, withDetails };
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to parse fallback data from ${key}:`, error.message);
+    }
+  }
+
+  return null;
+}
+
+function integrationHasFallback(fallback) {
+  return !!(fallback && Array.isArray(fallback.parsed?.data) && fallback.parsed.data.length > 0 && (fallback.withDetails ?? 0) > 0);
+}
+
 async function integrateWithExistingDetails(env, basicLiverData) {
   try {
     console.log('🔄 Integrating with existing details...');
@@ -966,9 +996,16 @@ async function integrateWithExistingDetails(env, basicLiverData) {
       console.log(`🔍 Searched keys: ${protectionKeys.join(', ')}`);
     }
 
+    const lastKnownGood = await getLastKnownGoodData(env);
+
     if (!existingDataStr) {
-      console.log('⚠️ No existing detailed data found in any key, creating basic only');
+      console.log('⚠️ No existing detailed data found in any key.');
+      if (lastKnownGood) {
+        console.log(`🛡️ Preserving last known good dataset from ${lastKnownGood.key} to avoid data loss.`);
+        return lastKnownGood.parsed;
+      }
       console.log('🔍 Checked keys: latest_integrated_data, latest_integrated_backup, latest_detailed_data, latest_data');
+      console.log('⚠️ No fallback dataset available. Proceeding with basic-only data creation.');
       return await createBasicOnlyData(env, basicLiverData);
     }
 
@@ -1038,12 +1075,28 @@ async function integrateWithExistingDetails(env, basicLiverData) {
       }
     };
 
+    const withDetailsCount = integratedResult.integration.withDetails;
+
+    if (withDetailsCount === 0) {
+      if (integrationHasFallback(lastKnownGood)) {
+        console.warn('⚠️ Integrated result contains 0 detailed entries. Keeping last known good dataset to prevent data loss.');
+        console.log(`🛡️ Fallback source: ${lastKnownGood.key}`);
+        return lastKnownGood.parsed;
+      }
+
+      console.warn('⚠️ Integrated result contains 0 detailed entries and no fallback exists. KV will retain basic-only data.');
+      await env.LIVER_DATA?.put('latest_data', JSON.stringify(integratedResult));
+      await env.LIVER_DATA?.put('latest_integrated_data', JSON.stringify(integratedResult));
+      console.log('✅ Basic-only dataset written (initial population scenario)');
+      return integratedResult;
+    }
+
     // 複数のキーに書き込み（データ保護強化）
     console.log('💾 Writing integrated data to multiple keys...');
     await env.LIVER_DATA?.put('latest_data', JSON.stringify(integratedResult));
     console.log('✅ Written to latest_data');
 
-    // バックアップキーにも保存
+    // バックアップキーにも保存（詳細付きのみ更新）
     await env.LIVER_DATA?.put('latest_integrated_data', JSON.stringify(integratedResult));
     console.log('✅ Written to latest_integrated_data');
 

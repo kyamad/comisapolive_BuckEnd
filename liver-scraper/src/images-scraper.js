@@ -10,67 +10,9 @@ export default {
     console.log('🖼️ Starting images scraper (Worker3)...');
     
     try {
-      // メインworkerのAPIから最新データを取得（profileImages付き）
-      let livers = [];
-      let dataSource = 'none';
-      
-      try {
-        console.log('🔄 Fetching data from main worker API...');
-        const response = await fetch('https://liver-scraper-main.pwaserve8.workers.dev/api/livers');
-        console.log(`📡 API Response status: ${response.status}`);
-        if (response.ok) {
-          const apiData = await response.json();
-          console.log(`📋 API Response structure: success=${apiData.success}, dataLength=${apiData.data?.length}`);
-          if (apiData.success && apiData.data) {
-            livers = apiData.data;
-            dataSource = 'main_api';
-            console.log(`📊 Using main API data: ${livers.length} livers`);
-            console.log(`🔍 First liver profileImages: ${JSON.stringify(livers[0]?.profileImages)}`);
-          } else {
-            console.log('⚠️ API response missing success or data field');
-          }
-        } else {
-          console.log(`⚠️ API response not OK: ${response.status} ${response.statusText}`);
-        }
-      } catch (fetchError) {
-        console.log(`⚠️ Failed to fetch from main API: ${fetchError.message}, falling back to KV data`);
-      }
-      
-      // APIが失敗した場合はKVデータにフォールバック - 新しいキー構造を使用
-      if (livers.length === 0) {
-        console.log('📋 Falling back to KV data...');
-        // 最新の基本データを試行
-        const basicDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_basic_data') : null;
-        if (basicDataStr) {
-          const basicData = JSON.parse(basicDataStr);
-          if (basicData && basicData.data) {
-            livers = basicData.data;
-            dataSource = 'basic_kv';
-            console.log(`📊 Using basic KV data: ${livers.length} livers`);
-          }
-        }
-        
-        // それでも失敗した場合は古いデータ構造を試行
-        if (livers.length === 0) {
-          const mainDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
-          if (mainDataStr) {
-            const mainData = JSON.parse(mainDataStr);
-            livers = mainData.data || [];
-            dataSource = 'main_kv';
-            console.log(`📊 Using main worker KV data: ${livers.length} livers`);
-            console.log(`🔍 First liver profileImages: ${JSON.stringify(livers[0]?.profileImages)}`);
-          } else {
-            console.log('ℹ️ No main data, trying detailed data...');
-            const detailedDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_detailed_data') : null;
-            if (detailedDataStr) {
-              const detailedData = JSON.parse(detailedDataStr);
-              livers = detailedData.data || [];
-              dataSource = 'detailed_kv';
-              console.log(`📊 Using detailed KV data: ${livers.length} livers`);
-            }
-          }
-        }
-      
+      const { livers, dataSource } = await loadLiversFromStorage(env);
+      console.log(`📦 Loaded ${livers.length} livers for image processing (source: ${dataSource})`);
+
       if (livers.length === 0) {
         console.log('ℹ️ No livers to process for images');
         return;
@@ -109,7 +51,7 @@ export default {
         }));
       }
     }
-  }
+  },
 
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -135,87 +77,25 @@ export default {
     // バッチ画像処理開始エンドポイント
     if (url.pathname === '/start-batch') {
       try {
-        // メインworkerのAPIから最新データを取得（profileImages付き）
-        let livers = [];
-        let dataSource = 'none';
-        
-        try {
-          console.log('🔄 Fetching data from main worker API...');
-          const response = await fetch('https://liver-scraper-main.pwaserve8.workers.dev/api/livers');
-          console.log(`📡 API Response status: ${response.status}`);
-          if (response.ok) {
-            const apiData = await response.json();
-            console.log(`📋 API Response structure: success=${apiData.success}, dataLength=${apiData.data?.length}`);
-            if (apiData.success && apiData.data) {
-              livers = apiData.data;
-              dataSource = 'main_api';
-              console.log(`📊 Using main API data: ${livers.length} livers`);
-              console.log(`🔍 First liver profileImages: ${JSON.stringify(livers[0]?.profileImages)}`);
-            } else {
-              console.log('⚠️ API response missing success or data field');
-            }
-          } else {
-            console.log(`⚠️ API response not OK: ${response.status} ${response.statusText}`);
-          }
-        } catch (fetchError) {
-          console.log(`⚠️ Failed to fetch from main API: ${fetchError.message}, falling back to KV data`);
-        }
-        
-        // APIが失敗した場合はKVデータにフォールバック - 新しいキー構造を使用
+        const { livers, dataSource } = await loadLiversFromStorage(env);
+        console.log(`📦 Loaded ${livers.length} livers for manual image batch (source: ${dataSource})`);
+
         if (livers.length === 0) {
-          console.log('📋 Falling back to KV data...');
-          // 最新の基本データを試行
-          const basicDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_basic_data') : null;
-          if (basicDataStr) {
-            const basicData = JSON.parse(basicDataStr);
-            if (basicData && basicData.data) {
-              livers = basicData.data;
-              dataSource = 'basic_kv';
-              console.log(`📊 Using basic KV data: ${livers.length} livers`);
-            }
-          }
-          
-          // それでも失敗した場合は古いデータ構造を試行
-          if (livers.length === 0) {
-            const mainDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_data') : null;
-            if (mainDataStr) {
-              const mainData = JSON.parse(mainDataStr);
-            livers = mainData.data || [];
-            dataSource = 'main_kv';
-            console.log(`📊 Using main worker KV data: ${livers.length} livers`);
-            console.log(`🔍 First liver profileImages: ${JSON.stringify(livers[0]?.profileImages)}`);
-          } else {
-            console.log('ℹ️ No main data, trying detailed data...');
-            const detailedDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_detailed_data') : null;
-            if (detailedDataStr) {
-              const detailedData = JSON.parse(detailedDataStr);
-              livers = detailedData.data || [];
-              dataSource = 'detailed_kv';
-            } else {
-              const basicDataStr = env.LIVER_DATA ? await env.LIVER_DATA.get('latest_basic_data') : null;
-              if (basicDataStr) {
-                const basicData = JSON.parse(basicDataStr);
-                livers = basicData.data || [];
-                dataSource = 'basic_kv';
-              } else {
-                return new Response(JSON.stringify({
-                  success: false,
-                  error: 'No data available (neither API nor KV)'
-                }), {
-                  status: 400,
-                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-                });
-              }
-            }
-          }
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'No data available for image processing'
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
         }
-        
+
         const batchSize = parseInt(url.searchParams.get('batch')) || 10;
-        
+
         // 段階的画像処理を実行
         const imageProcessor = new ProgressiveImageProcessor(env);
         const result = await imageProcessor.processImagesBatch(livers);
-        
+
         return new Response(JSON.stringify({
           success: true,
           message: `Processed batch for ${livers.length} livers`,
@@ -419,6 +299,47 @@ async function processImagesBatch(env, livers, batchSize = 8) {
     
     throw error;
   }
+}
+
+// KV から最新のライバーデータを読み込む
+async function loadLiversFromStorage(env) {
+  if (!env.LIVER_DATA) {
+    console.log('⚠️ LIVER_DATA binding not available');
+    return { livers: [], dataSource: 'no_kv' };
+  }
+
+  const candidateKeys = [
+    { key: 'liver_data_current', label: 'unified_current' },
+    { key: 'liver_data_backup', label: 'unified_backup' },
+    { key: 'latest_integrated_data', label: 'integrated' },
+    { key: 'latest_integrated_data_primary', label: 'integrated_primary' },
+    { key: 'latest_integrated_data_secondary', label: 'integrated_secondary' },
+    { key: 'latest_integrated_data_tertiary', label: 'integrated_tertiary' },
+    { key: 'latest_data', label: 'latest' },
+    { key: 'latest_detailed_data', label: 'detailed' },
+    { key: 'latest_basic_data', label: 'basic' }
+  ];
+
+  for (const candidate of candidateKeys) {
+    try {
+      const dataStr = await env.LIVER_DATA.get(candidate.key);
+      if (!dataStr) {
+        continue;
+      }
+
+      const parsed = JSON.parse(dataStr);
+      const livers = Array.isArray(parsed?.data) ? parsed.data : Array.isArray(parsed) ? parsed : [];
+
+      if (livers.length > 0) {
+        console.log(`✅ Loaded ${livers.length} livers from ${candidate.label}`);
+        return { livers, dataSource: candidate.label };
+      }
+    } catch (error) {
+      console.log(`⚠️ Failed to read ${candidate.key}: ${error.message}`);
+    }
+  }
+
+  return { livers: [], dataSource: 'none' };
 }
 
 // 画像統計情報を取得

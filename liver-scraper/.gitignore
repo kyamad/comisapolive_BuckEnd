@@ -170,3 +170,8 @@ dist
 
 .dev.vars
 .wrangler/
+
+# Local tooling and OS artifacts
+.vscode/
+.claude/
+.DS_Store

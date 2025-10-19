@@ -2,8 +2,15 @@
 // 役割: 詳細情報取得専門
 // Cronスケジュール: "30 0,6,12,18 * * *" (メインの30分後)
 
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 export default {
   async scheduled(event, env, ctx) {
+    console.log('🚀 EMERGENCY_V8_CACHE_CLEAR_V3.0_' + Date.now());
+    console.log('=== ULTIMATE FORCE CACHE INVALIDATION ===');
+    console.log('🔥 V8_ISOLATE_EMERGENCY_RESTART_REQUIRED');
+    console.log('🚀 HYBRID_SOLUTION_V2.1_DEPLOYED_' + Date.now());
+    console.log('=== FORCE CACHE CLEAR DEPLOYMENT ===');
     console.log('🔍 Starting details scraper (Worker2) - Scheduled execution...');
     
     try {
@@ -32,15 +39,18 @@ export default {
   },
 
   async fetch(request, env) {
+    console.log('🚀 EMERGENCY_V8_CACHE_CLEAR_V3.0_' + Date.now());
+    console.log('🔥 FETCH_HANDLER_CACHE_BREAK_' + Math.random());
+
     const url = new URL(request.url);
-    
+
     // CORS設定
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
-    
+
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
@@ -227,9 +237,9 @@ export default {
           timestamp: new Date().toISOString(),
           debugInfo: {
             envVars: {
-              hasLoginId: !!env.LOGIN_ID,
+              hasLoginId: !!env.LOGIN_EMAIL,
               hasLoginPassword: !!env.LOGIN_PASSWORD,
-              loginIdDefault: env.LOGIN_ID || 'using fallback: comisapolive@gmail.com',
+              loginIdDefault: env.LOGIN_EMAIL || 'using fallback: comisapolive@gmail.com',
               passwordDefault: env.LOGIN_PASSWORD || 'using fallback: cord3cord3'
             }
           }
@@ -460,7 +470,7 @@ export default {
             hasImageHashes: !!env.IMAGE_HASHES,
             hasImages: !!env.IMAGES,
             workerAuthToken: env.WORKER_AUTH_TOKEN ? 'Set' : 'Not set',
-            loginId: env.LOGIN_ID ? 'Set' : 'Using fallback',
+            loginId: env.LOGIN_EMAIL ? 'Set' : 'Using fallback',
             loginPassword: env.LOGIN_PASSWORD ? 'Set' : 'Using fallback'
           }
         }), {
@@ -1008,6 +1018,8 @@ async function processDetailsBatch(env, livers, batchSize = 1) {
   } else {
     console.log('🔄 Reusing stored session');
   }
+  loginResult.userAgent = loginResult.userAgent || DEFAULT_USER_AGENT;
+  const resolveUserAgent = () => loginResult?.userAgent || DEFAULT_USER_AGENT;
   
   await updateWorkerStatus(env, 'details', 'in_progress', {
     total: livers.length,
@@ -1023,9 +1035,27 @@ async function processDetailsBatch(env, livers, batchSize = 1) {
     // バッチ内で逐次処理（並列処理を停止してSubrequest制限を回避）
     for (const liver of batch) {
       try {
-        const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, loginResult.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', env, loginResult);
-        
-        if (detailInfo) {
+        let detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, resolveUserAgent(), env, loginResult);
+
+        if (detailInfo?.requiresLogin) {
+          console.log(`⚠️ ${liver.name} - Session appears invalid, re-authenticating...`);
+          const relogin = await performRobustLogin(env);
+          if (relogin.success) {
+            loginResult = relogin;
+            loginResult.userAgent = loginResult.userAgent || DEFAULT_USER_AGENT;
+            await storeSession(env, loginResult);
+            detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, resolveUserAgent(), env, loginResult);
+          } else {
+            console.error(`❌ ${liver.name} - Re-login failed: ${relogin.error || 'unknown error'}`);
+            detailInfo = {
+              success: false,
+              requiresLogin: true,
+              error: relogin.error || 'Re-login failed'
+            };
+          }
+        }
+
+        if (detailInfo && detailInfo.success === true && detailInfo.details) {
           const detailedLiver = {
             ...liver,
             ...detailInfo,
@@ -1040,31 +1070,35 @@ async function processDetailsBatch(env, livers, batchSize = 1) {
           console.log(`⚠️ ${liver.name} - No details found`);
           detailedLivers.push({
             ...liver,
-            hasDetails: false
+            hasDetails: false,
+            detailError: detailInfo?.error || (detailInfo?.requiresLogin ? 'requires login' : 'no details found')
           });
         }
         
         // 個別リクエスト間の待機時間を短縮（セッション維持のため）
         await sleep(500);
-        
+
       } catch (error) {
         console.error(`❌ ${liver.name} - Detail scraping failed:`, error.message);
-        
+
         // 認証エラーの場合は再ログイン試行
         if (error.message.includes('認証失敗') || error.message.includes('ログインページ')) {
           console.log('🔄 Authentication failed, attempting re-login...');
           try {
-            loginResult = await performRobustLogin(env);
-            if (loginResult.success) {
+            const relogin = await performRobustLogin(env);
+            if (relogin.success) {
+              loginResult = relogin;
+              loginResult.userAgent = loginResult.userAgent || DEFAULT_USER_AGENT;
               await storeSession(env, loginResult);
               console.log('✅ Re-login successful, continuing...');
-              // 再ログイン成功時はスキップ（次のバッチで再試行）
+            } else {
+              console.error('❌ Re-login failed:', relogin.error || relogin.message || 'unknown error');
             }
           } catch (reloginError) {
             console.error('❌ Re-login failed:', reloginError.message);
           }
         }
-        
+
         errors++;
         // エラーでも基本情報は保持
         detailedLivers.push({
@@ -1342,7 +1376,7 @@ async function performRobustLogin(env) {
     const loginData = new URLSearchParams();
     
     // 環境変数から認証情報を取得（fallback付き）
-    const email = env.LOGIN_ID || 'comisapolive@gmail.com';
+    const email = env.LOGIN_EMAIL || 'comisapolive@gmail.com';
     const password = env.LOGIN_PASSWORD || 'cord3cord3';
     
     // 複数のフィールド名パターンを試行
@@ -1477,6 +1511,7 @@ async function performRobustLogin(env) {
       success,
       cookies: allCookies,
       method,
+      userAgent: DEFAULT_USER_AGENT,
       error: success ? null : 'Login failed - no success indicators found'
     };
     
@@ -1770,13 +1805,76 @@ function extractFormAction(html) {
 
 // 基本データと詳細データを統合してアプリ用のlatest_dataを更新
 async function integrateDataForApp(env, detailedLivers) {
+  // Solution C-4: 実行ロック機構
+  const lockKey = 'integration_lock';
+  const lockTimeout = 5 * 60 * 1000; // 5分のタイムアウト
+
   try {
     console.log('🔄 Starting data integration for app...');
+    console.log(`📊 Input detailedLivers count: ${detailedLivers.length}`);
+
+    // 実行ロックの確認と設定
+    const existingLock = await env.LIVER_DATA?.get(lockKey);
+    if (existingLock) {
+      const lockData = JSON.parse(existingLock);
+      const lockAge = Date.now() - lockData.timestamp;
+
+      if (lockAge < lockTimeout) {
+        console.log(`🔒 Integration lock active (${Math.round(lockAge/1000)}s ago). Skipping execution.`);
+        return;
+      } else {
+        console.log(`⚠️ Stale lock detected (${Math.round(lockAge/1000)}s ago). Proceeding with integration.`);
+      }
+    }
+
+    // ロックを設定
+    const lockData = {
+      timestamp: Date.now(),
+      process: 'integrateDataForApp',
+      details_count: detailedLivers.length
+    };
+    await env.LIVER_DATA?.put(lockKey, JSON.stringify(lockData));
+    console.log('🔒 Integration lock acquired');
+
+    // Solution C-1: データ回帰保護 - 既存の詳細データ数をチェック
+    const existingIntegratedStr = await env.LIVER_DATA?.get('latest_integrated_data');
+    let existingDetailsCount = 0;
+
+    if (existingIntegratedStr) {
+      try {
+        const existingData = JSON.parse(existingIntegratedStr);
+        existingDetailsCount = existingData.integration?.withDetails || 0;
+        console.log(`📊 Existing detailed data count: ${existingDetailsCount}`);
+      } catch (parseError) {
+        console.log('⚠️ Could not parse existing integrated data');
+      }
+    }
+
+    // 新しい詳細データ数
+    const newDetailsCount = detailedLivers.filter(liver =>
+      liver.hasDetails === true || liver.success === true
+    ).length;
+    console.log(`📊 New detailed data count: ${newDetailsCount}`);
+
+    // データ回帰保護：新しいデータが既存より大幅に少ない場合は警告
+    if (existingDetailsCount > 0 && newDetailsCount < existingDetailsCount * 0.8) {
+      console.log(`⚠️ DATA REGRESSION DETECTED!`);
+      console.log(`   Existing: ${existingDetailsCount}, New: ${newDetailsCount}`);
+      console.log(`   Reduction: ${((existingDetailsCount - newDetailsCount) / existingDetailsCount * 100).toFixed(1)}%`);
+
+      // 重大な回帰の場合は統合をスキップ
+      if (newDetailsCount < existingDetailsCount * 0.5) {
+        console.log(`❌ CRITICAL REGRESSION: Skipping integration to protect data`);
+        await env.LIVER_DATA?.delete(lockKey); // ロック解除
+        return;
+      }
+    }
 
     // 基本データを取得
     const basicDataStr = await env.LIVER_DATA?.get('latest_basic_data');
     if (!basicDataStr) {
       console.log('⚠️ No basic data found for integration');
+      await env.LIVER_DATA?.delete(lockKey); // ロック解除
       return;
     }
 
@@ -1795,7 +1893,7 @@ async function integrateDataForApp(env, detailedLivers) {
     const integratedData = basicLivers.map(basicLiver => {
       const details = detailsMap.get(basicLiver.originalId);
 
-      if (details && details.hasDetails) {
+      if (details && (details.hasDetails === true || details.success === true)) {
         // 詳細データが存在する場合はマージ
         return {
           ...basicLiver,
@@ -1833,11 +1931,103 @@ async function integrateDataForApp(env, detailedLivers) {
       }
     };
 
+    // 統合完了を詳細ログ出力
+    console.log('📊 Integration summary:');
+    console.log(`   Basic data: ${integratedResult.integration.basicCount} items`);
+    console.log(`   Detail input: ${integratedResult.integration.detailCount} items`);
+    console.log(`   With details: ${integratedResult.integration.withDetails} items`);
+    console.log(`   Pending: ${integratedResult.integration.pending} items`);
+
+    // Hybrid Solution (B + A): 複数保護キー戦略 + KV整合性待機機構
+    console.log('💾 Implementing multi-key protection strategy for KV consistency...');
+
+    // Phase 1: 複数保護キー書き込み（即効性）
+    const timestamp = Date.now();
+    const protectionKeys = [
+      'latest_integrated_data_primary',
+      'latest_integrated_data_secondary',
+      'latest_integrated_data_tertiary',
+      'latest_integrated_data', // 既存キー（互換性）
+      'latest_integrated_backup' // 既存バックアップキー（互換性）
+    ];
+
+    console.log(`📝 Writing ${protectionKeys.length} protection keys with timestamp: ${timestamp}`);
+
+    // 並列書き込みでKV同期問題を軽減
+    const writePromises = protectionKeys.map(async (key, index) => {
+      try {
+        await env.LIVER_DATA?.put(key, JSON.stringify(integratedResult));
+        console.log(`✅ Protection key written: ${key} (${index + 1}/${protectionKeys.length})`);
+        return { key, status: 'success' };
+      } catch (error) {
+        console.error(`❌ Failed to write protection key: ${key}`, error);
+        return { key, status: 'failed', error: error.message };
+      }
+    });
+
+    const writeResults = await Promise.all(writePromises);
+    const successCount = writeResults.filter(r => r.status === 'success').length;
+    console.log(`📊 Protection keys written: ${successCount}/${protectionKeys.length} successful`);
+
+    // Main Worker API用データ更新
     await env.LIVER_DATA?.put('latest_data', JSON.stringify(integratedResult));
+    console.log('✅ Main API data updated with structured format');
+
+    // Phase 2: KV整合性待機機構（信頼性向上）
+    console.log('⏳ Implementing KV consistency wait mechanism...');
+
+    // 30秒待機してKV同期を確実にする
+    console.log('⏳ Waiting 30 seconds for KV synchronization across Cloudflare edge network...');
+    await sleep(30000);
+
+    // 書き込み確認テスト：いずれかのキーが読み取れることを確認
+    console.log('🔍 Verifying KV write consistency...');
+    let verificationSuccess = false;
+
+    for (const key of protectionKeys) {
+      try {
+        const testRead = await env.LIVER_DATA?.get(key);
+        if (testRead) {
+          console.log(`✅ Verification successful: ${key} is readable`);
+          verificationSuccess = true;
+          break;
+        }
+      } catch (error) {
+        console.warn(`⚠️ Verification failed for ${key}:`, error.message);
+      }
+    }
+
+    if (verificationSuccess) {
+      console.log('✅ KV consistency verification passed - data protection active');
+    } else {
+      console.error('❌ KV consistency verification failed - protection may not be reliable');
+      // 追加の10秒待機
+      console.log('⏳ Additional 10-second wait for edge propagation...');
+      await sleep(10000);
+    }
+
+    // ロック解除
+    await env.LIVER_DATA?.delete(lockKey);
+    console.log('🔓 Integration lock released');
+
     console.log(`✅ Data integration completed: ${integratedData.length} total, ${integratedResult.integration.withDetails} with details`);
 
   } catch (error) {
     console.error('❌ Data integration failed:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+
+    // エラー時もロックを解除
+    try {
+      await env.LIVER_DATA?.delete(lockKey);
+      console.log('🔓 Integration lock released (error cleanup)');
+    } catch (lockCleanupError) {
+      console.error('❌ Failed to release lock during error cleanup:', lockCleanupError);
+    }
+
     // 統合失敗時はエラーをログに記録するが処理は継続
   }
 }
@@ -1895,6 +2085,8 @@ async function processSmallBatch(env, livers, maxItems = 3) {
     }
     await storeSession(env, loginResult);
   }
+  loginResult.userAgent = loginResult.userAgent || DEFAULT_USER_AGENT;
+  const resolveUserAgent = () => loginResult?.userAgent || DEFAULT_USER_AGENT;
   
   let successCount = 0;
   let errorCount = 0;
@@ -1911,13 +2103,30 @@ async function processSmallBatch(env, livers, maxItems = 3) {
       break;
     }
     try {
-      const detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, loginResult.userAgent, env, loginResult);
-      
-      if (detailInfo) {
-        // ユニークIDと画像URLを生成
-        const uniqueId = generateUniqueId(liver);
-        const imageUrl = `/api/images/${liver.originalId}.jpg`;
-        
+      let detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, resolveUserAgent(), env, loginResult);
+
+      if (detailInfo?.requiresLogin) {
+        console.log(`⚠️ ${liver.name} - Session likely expired during small batch, re-authenticating...`);
+        const relogin = await performRobustLogin(env);
+        if (relogin.success) {
+          loginResult = relogin;
+          loginResult.userAgent = loginResult.userAgent || DEFAULT_USER_AGENT;
+          await storeSession(env, loginResult);
+          detailInfo = await scrapeDetailPageWithAuth(liver.detailUrl, loginResult.cookies, resolveUserAgent(), env, loginResult);
+        } else {
+          console.error(`❌ ${liver.name} - Re-login failed during small batch: ${relogin.error || 'unknown error'}`);
+          detailInfo = {
+            success: false,
+            requiresLogin: true,
+            error: relogin.error || 'Re-login failed'
+          };
+        }
+      }
+      const uniqueId = generateUniqueId(liver);
+      const imageUrl = `/api/images/${liver.originalId}.jpg`;
+      const hasValidDetails = detailInfo && detailInfo.success === true && detailInfo.details;
+
+      if (hasValidDetails) {
         const detailedLiver = {
           ...liver,
           ...detailInfo,
@@ -1927,23 +2136,26 @@ async function processSmallBatch(env, livers, maxItems = 3) {
           hasDetails: true,
           detailScrapedAt: new Date().toISOString()
         };
-        
+
         processed.completed.push(detailedLiver);
         successCount++;
         console.log(`✅ ${liver.name} - Details collected (ID: ${uniqueId})`);
       } else {
-        // 詳細情報がない場合もユニークIDを生成
-        const uniqueId = generateUniqueId(liver);
-        const imageUrl = `/api/images/${liver.originalId}.jpg`;
-        
         processed.completed.push({
           ...liver,
+          ...(detailInfo || {}),
           id: uniqueId,
           imageUrl: imageUrl,
           updatedAt: Date.now(),
           hasDetails: false
         });
-        console.log(`⚠️ ${liver.name} - No details found (ID: ${uniqueId})`);
+
+        const reason = detailInfo?.requiresLogin
+          ? 'requires login'
+          : detailInfo?.error
+            ? `error: ${detailInfo.error}`
+            : 'no details found';
+        console.log(`⚠️ ${liver.name} - No details stored (${reason}) (ID: ${uniqueId})`);
       }
       
       // リクエスト間の待機を短縮してセッション維持
@@ -1953,12 +2165,16 @@ async function processSmallBatch(env, livers, maxItems = 3) {
       console.error(`❌ ${liver.name} - Detail scraping failed:`, error.message);
       
       // 認証失敗時は再ログイン
-      if (error.message.includes('認証失敗')) {
+      if (error.message.includes('認証失敗') || error.message.includes('ログイン')) {
         try {
-          loginResult = await performRobustLogin(env);
-          if (loginResult.success) {
+          const relogin = await performRobustLogin(env);
+          if (relogin.success) {
+            loginResult = relogin;
+            loginResult.userAgent = loginResult.userAgent || DEFAULT_USER_AGENT;
             await storeSession(env, loginResult);
             console.log('🔄 Re-login successful');
+          } else {
+            console.error('❌ Re-login failed:', relogin.error || 'unknown error');
           }
         } catch (reloginError) {
           console.error('❌ Re-login failed:', reloginError.message);
@@ -2034,7 +2250,10 @@ async function getStoredSession(env) {
     }
     
     console.log(`🔄 Found valid session (age: ${Math.round(sessionAge / 1000)}s)`);
-    return session;
+    return {
+      ...session,
+      userAgent: session.userAgent || DEFAULT_USER_AGENT
+    };
   } catch (error) {
     console.error('❌ Failed to get stored session:', error.message);
     return null;
@@ -2048,7 +2267,8 @@ async function storeSession(env, loginResult) {
     const sessionData = {
       success: true,
       cookies: loginResult.cookies,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      userAgent: loginResult.userAgent || DEFAULT_USER_AGENT
     };
     
     await env.LIVER_DATA.put('login_session', JSON.stringify(sessionData), {
