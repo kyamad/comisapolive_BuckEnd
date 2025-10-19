@@ -1,0 +1,30 @@
+name = "liver-scraper-main"
+main = "src/main-scraper.js"
+compatibility_date = "2024-01-01"
+account_id = "e610573ff233746b39a509deadc4ee36"
+
+# Worker1: メイン制御 - 6時間ごと
+[triggers]
+crons = ["0 0,6,12,18 * * *"]
+
+# 共有KVとR2バインディング
+[[kv_namespaces]]
+binding = "LIVER_DATA"
+id = "a9658ebf09ed49bba4ea6b35af67f9eb"
+
+[[kv_namespaces]]
+binding = "IMAGE_HASHES"
+id = "faaeff9c9c194751bc1e20549fdb3161"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "liver-images"
+
+# 環境変数
+[vars]
+DETAIL_WORKER_URL = "https://liver-scraper-details.liver-scraper-detailsapi.workers.dev"
+IMAGE_WORKER_URL = "https://liver-scraper-images.liver-scraper-detailsapi.workers.dev"
+
+# シークレット環境変数（wrangler secret putで設定）
+# LOGIN_EMAIL = "your-email@example.com"
+# LOGIN_PASSWORD = "your-password"

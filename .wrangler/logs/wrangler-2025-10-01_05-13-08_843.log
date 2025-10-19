@@ -1,0 +1,26 @@
+
+--- 2025-10-01T05:13:08.917Z debug
+🪵  Writing logs to "/Applications/develop/comisapoapp/.wrangler/logs/wrangler-2025-10-01_05-13-08_843.log"
+---
+
+--- 2025-10-01T05:13:08.917Z debug
+Metrics dispatcher: Posting data {"deviceId":"59be3959-c20c-4976-80c0-ff1acbf7ec3f","event":"wrangler command started","timestamp":1759295588917,"properties":{"amplitude_session_id":1759295588915,"amplitude_event_id":0,"wranglerVersion":"4.25.1","osPlatform":"Mac OS","osVersion":"Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:51 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_T8112","nodeVersion":24,"packageManager":"npm","isFirstUsage":true,"configFileType":"toml","isCI":false,"isPagesCI":false,"isWorkersCI":false,"isInteractive":false,"hasAssets":false,"argsUsed":[],"argsCombination":"","command":"wrangler deploy","args":{"xJsonConfig":true,"j":true,"noBundle":false,"latest":false,"keepVars":false,"xAutoCreate":true}}}
+---
+
+--- 2025-10-01T05:13:08.921Z debug
+.env file not found at ".env". Continuing... For more details, refer to https://developers.cloudflare.com/workers/wrangler/system-environment-variables/
+---
+
+--- 2025-10-01T05:13:08.937Z log
+
+ ⛅️ wrangler 4.25.1 (update available 4.40.3)
+─────────────────────────────────────────────
+---
+
+--- 2025-10-01T05:13:08.944Z debug
+Metrics dispatcher: Failed to send request: fetch failed
+---
+
+--- 2025-10-01T05:13:08.954Z log
+
+---

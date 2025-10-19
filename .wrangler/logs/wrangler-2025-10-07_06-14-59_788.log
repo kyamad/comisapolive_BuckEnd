@@ -1,0 +1,386 @@
+
+--- 2025-10-07T06:14:59.874Z debug
+🪵  Writing logs to "/Applications/develop/comisapoapp/.wrangler/logs/wrangler-2025-10-07_06-14-59_788.log"
+---
+
+--- 2025-10-07T06:14:59.874Z debug
+Metrics dispatcher: Posting data {"deviceId":"59be3959-c20c-4976-80c0-ff1acbf7ec3f","event":"wrangler command started","timestamp":1759817699874,"properties":{"amplitude_session_id":1759817699873,"amplitude_event_id":0,"wranglerVersion":"4.25.1","osPlatform":"Mac OS","osVersion":"Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:51 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_T8112","nodeVersion":24,"packageManager":"npm","isFirstUsage":false,"configFileType":"toml","isCI":false,"isPagesCI":false,"isWorkersCI":false,"isInteractive":false,"hasAssets":false,"argsUsed":[],"argsCombination":"","command":"wrangler deploy","args":{"xJsonConfig":true,"j":true,"noBundle":false,"latest":false,"keepVars":false,"xAutoCreate":true}}}
+---
+
+--- 2025-10-07T06:14:59.878Z debug
+.env file not found at ".env". Continuing... For more details, refer to https://developers.cloudflare.com/workers/wrangler/system-environment-variables/
+---
+
+--- 2025-10-07T06:14:59.901Z log
+
+ ⛅️ wrangler 4.25.1 (update available 4.42.0)
+─────────────────────────────────────────────
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+Starting verifyWorkerMatchesCITag() with tag: undefined, name: liver-scraper-main
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+No WRANGLER_CI_MATCH_TAG variable provided, aborting verifyWorkerMatchesCITag()
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+-- START CF API REQUEST: GET https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/services/liver-scraper-main
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:14:59.951Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:00.775Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:00.775Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:00.775Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:00.775Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:00.780Z debug
+-- START CF API REQUEST: GET https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/scripts/liver-scraper-main/deployments
+---
+
+--- 2025-10-07T06:15:00.780Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:00.780Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:00.780Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:00.780Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:02.767Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:02.768Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:02.768Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:02.768Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:02.808Z log
+Total Upload: 190.53 KiB / gzip: 29.59 KiB
+---
+
+--- 2025-10-07T06:15:02.810Z debug
+-- START CF API REQUEST: POST https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/scripts/liver-scraper-main/versions
+---
+
+--- 2025-10-07T06:15:02.810Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:02.810Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:02.810Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:02.811Z debug
+BODY: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:02.811Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:07.271Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:07.272Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:07.272Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:07.272Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:07.274Z debug
+-- START CF API REQUEST: POST https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/scripts/liver-scraper-main/deployments
+---
+
+--- 2025-10-07T06:15:07.274Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:07.274Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:07.274Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:07.274Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:08.808Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:08.808Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:08.808Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:08.808Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:08.809Z debug
+-- START CF API REQUEST: PATCH https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/scripts/liver-scraper-main/script-settings
+---
+
+--- 2025-10-07T06:15:08.809Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:08.809Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:08.809Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:08.809Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:10.479Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:10.480Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.480Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.480Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:10.482Z log
+Your Worker has access to the following bindings:
+---
+
+--- 2025-10-07T06:15:10.482Z log
+Binding                                                        Resource                  
+---
+
+--- 2025-10-07T06:15:10.483Z log
+env.LIVER_DATA (4adf452d17b14628a67d1bbe183d6b53)              KV Namespace              
+---
+
+--- 2025-10-07T06:15:10.483Z log
+env.IMAGE_HASHES (315e8927f3284e969d9657c0e97bbab8)            KV Namespace              
+---
+
+--- 2025-10-07T06:15:10.484Z log
+env.RATE_LIMIT (4ad1e2f3d0a240b3883bfb8e36edd398)              KV Namespace              
+---
+
+--- 2025-10-07T06:15:10.484Z log
+env.REVIEWS_DB (liver-reviews-db)                              D1 Database               
+---
+
+--- 2025-10-07T06:15:10.484Z log
+env.IMAGES (liver-images)                                      R2 Bucket                 
+---
+
+--- 2025-10-07T06:15:10.484Z log
+env.WORKER_AUTH_TOKEN ("liver-scraper-secure-token-2024")      Environment Variable      
+---
+
+--- 2025-10-07T06:15:10.484Z log
+
+---
+
+--- 2025-10-07T06:15:10.486Z log
+Uploaded liver-scraper-main (9.71 sec)
+---
+
+--- 2025-10-07T06:15:10.487Z debug
+-- START CF API REQUEST: GET https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/scripts/liver-scraper-main/subdomain
+---
+
+--- 2025-10-07T06:15:10.487Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.487Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.487Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.487Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:10.941Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:10.941Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.941Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.941Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:10.942Z debug
+-- START CF API REQUEST: GET https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/subdomain
+---
+
+--- 2025-10-07T06:15:10.942Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.942Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.942Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:10.942Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:11.287Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+-- START CF API REQUEST: PUT https://api.cloudflare.com/client/v4/accounts/4cf5abc5b44aacd9b0776ac001d9826a/workers/scripts/liver-scraper-main/schedules
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+QUERY STRING: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+INIT: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.288Z debug
+-- END CF API REQUEST
+---
+
+--- 2025-10-07T06:15:11.660Z debug
+-- START CF API RESPONSE: OK 200
+---
+
+--- 2025-10-07T06:15:11.660Z debug
+HEADERS: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.660Z debug
+RESPONSE: omitted; set WRANGLER_LOG_SANITIZE=false to include sanitized data
+---
+
+--- 2025-10-07T06:15:11.660Z debug
+-- END CF API RESPONSE
+---
+
+--- 2025-10-07T06:15:11.661Z log
+Deployed liver-scraper-main triggers (0.72 sec)
+---
+
+--- 2025-10-07T06:15:11.661Z log
+  https://liver-scraper-main.pwaserve8.workers.dev
+---
+
+--- 2025-10-07T06:15:11.661Z log
+  schedule: 0 * * * *
+---
+
+--- 2025-10-07T06:15:11.661Z log
+Current Version ID: 6e7a3eb1-2c2e-4c92-a815-3e07cfdb5c12
+---
+
+--- 2025-10-07T06:15:11.662Z debug
+Metrics dispatcher: Posting data {"deviceId":"59be3959-c20c-4976-80c0-ff1acbf7ec3f","event":"deploy worker script","timestamp":1759817711662,"properties":{"category":"Workers","wranglerVersion":"4.25.1","os":"darwin:arm64","usesTypeScript":false,"durationMs":11710}}
+---
+
+--- 2025-10-07T06:15:11.667Z debug
+Metrics dispatcher: Posting data {"deviceId":"59be3959-c20c-4976-80c0-ff1acbf7ec3f","event":"wrangler command completed","timestamp":1759817711667,"properties":{"amplitude_session_id":1759817699873,"amplitude_event_id":1,"wranglerVersion":"4.25.1","osPlatform":"Mac OS","osVersion":"Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:51 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_T8112","nodeVersion":24,"packageManager":"npm","isFirstUsage":false,"configFileType":"toml","isCI":false,"isPagesCI":false,"isWorkersCI":false,"isInteractive":false,"hasAssets":false,"argsUsed":[],"argsCombination":"","command":"wrangler deploy","args":{"xJsonConfig":true,"j":true,"noBundle":false,"latest":false,"keepVars":false,"xAutoCreate":true},"durationMs":11802,"durationSeconds":11.802,"durationMinutes":0.19669999999999999}}
+---

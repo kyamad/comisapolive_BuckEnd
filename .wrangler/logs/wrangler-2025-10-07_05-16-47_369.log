@@ -1,0 +1,30 @@
+
+--- 2025-10-07T05:16:47.432Z debug
+🪵  Writing logs to "/Applications/develop/comisapoapp/.wrangler/logs/wrangler-2025-10-07_05-16-47_369.log"
+---
+
+--- 2025-10-07T05:16:47.432Z debug
+Metrics dispatcher: Posting data {"deviceId":"59be3959-c20c-4976-80c0-ff1acbf7ec3f","event":"wrangler command started","timestamp":1759814207432,"properties":{"amplitude_session_id":1759814207430,"amplitude_event_id":0,"wranglerVersion":"4.25.1","osPlatform":"Mac OS","osVersion":"Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:51 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_T8112","nodeVersion":24,"packageManager":"npm","isFirstUsage":false,"configFileType":"toml","isCI":false,"isPagesCI":false,"isWorkersCI":false,"isInteractive":false,"hasAssets":false,"argsUsed":[],"argsCombination":"","command":"wrangler deploy","args":{"xJsonConfig":true,"j":true,"noBundle":false,"latest":false,"keepVars":false,"xAutoCreate":true}}}
+---
+
+--- 2025-10-07T05:16:47.436Z debug
+.env file not found at ".env". Continuing... For more details, refer to https://developers.cloudflare.com/workers/wrangler/system-environment-variables/
+---
+
+--- 2025-10-07T05:16:47.452Z debug
+Metrics dispatcher: Failed to send request: fetch failed
+---
+
+--- 2025-10-07T05:16:47.456Z log
+
+ ⛅️ wrangler 4.25.1
+───────────────────
+---
+
+--- 2025-10-07T05:16:47.473Z debug
+Starting verifyWorkerMatchesCITag() with tag: undefined, name: liver-scraper-main
+---
+
+--- 2025-10-07T05:16:47.474Z debug
+No WRANGLER_CI_MATCH_TAG variable provided, aborting verifyWorkerMatchesCITag()
+---
