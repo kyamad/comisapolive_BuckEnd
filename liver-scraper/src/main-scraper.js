@@ -1,3 +1,5 @@
+import { postReview, getReviews, getReviewStats, deleteReview } from './reviews-api.js';
+
 // Worker1: liver-scraper-main (メイン制御)
 // 役割: 基本データ取得 + 他Workerの制御
 // Cronスケジュール: "0 0,6,12,18 * * *" (6時間ごと)
@@ -182,6 +184,36 @@ export default {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
+    }
+
+    // レビューAPI
+    if (url.pathname.startsWith('/api/reviews')) {
+      if (request.method === 'POST' && url.pathname === '/api/reviews') {
+        return await postReview(request, env);
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/api/reviews/stats/')) {
+        const liverId = url.pathname.split('/').pop();
+        return await getReviewStats(liverId, env);
+      }
+
+      if (request.method === 'GET' && url.pathname.startsWith('/api/reviews/')) {
+        const liverId = url.pathname.split('/').pop();
+        return await getReviews(liverId, env);
+      }
+
+      if (request.method === 'DELETE' && url.pathname.startsWith('/api/reviews/')) {
+        const reviewId = url.pathname.split('/').pop();
+        return await deleteReview(reviewId, request, env);
+      }
+
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Method not allowed'
+      }), {
+        status: 405,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+      });
     }
 
     // テスト用: 統合保護機能テストエンドポイント
