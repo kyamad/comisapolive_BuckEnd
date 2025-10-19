@@ -48,6 +48,37 @@ printf 'Aiyg2x9ATjBRRS347qoRRjPaR9eGp7CHGi6tJDoi6Kk=' | \
 | 詳細件数確認 | `curl -s "https://liver-scraper-main.liver-scraper-detailsapi.workers.dev/api/livers" \| jq '.data | map(select(.hasDetails == true)) | length'` | 61 件より増加しているかを確認。 |
 | ログ監視 | `wrangler tail --config wrangler-main.toml` / `--config wrangler-details.toml` など | 再ログイン失敗 (`Re-login failed`) などを把握。 |
 
+### 3-1. 口コミAPIの管理者削除フロー
+
+口コミ機能では、誤投稿や不適切なコメントを削除するための管理者専用エンドポイントを用意しています。Cloudflare Secrets に `ADMIN_SECRET` が登録済みであることを前提に、以下の手順で実施してください。
+
+1. 対象レビューの ID を確認する
+   - `GET /api/reviews/:liverId` のレスポンスに `id` が含まれています。
+   - 例: `curl -s "https://liver-scraper-main.liver-scraper-detailsapi.workers.dev/api/reviews/158" | jq '.reviews'`
+2. `ADMIN_SECRET` を確認する
+   - 端末側に保存していない場合は `wrangler secret inspect ADMIN_SECRET --config wrangler-main.toml` で確認できます。
+3. 削除リクエストを送る
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <ADMIN_SECRET>" \
+  "https://liver-scraper-main.liver-scraper-detailsapi.workers.dev/api/reviews/<REVIEW_ID>"
+```
+
+- `<ADMIN_SECRET>` には実際のシークレット値をそのまま記載します。
+- `<REVIEW_ID>` には手順 1 で確認した数値 ID を指定します。
+
+成功すると以下のようなレスポンスが返り、HTTP ステータス 200 が確認できます。
+
+```json
+{
+  "success": true,
+  "message": "Review deleted successfully"
+}
+```
+
+認証ヘッダーが無い、もしくは値が間違っている場合は 401 `Unauthorized` が返ります。誤って複数回実行しても既に削除済みであれば 404 `Review not found` が返るだけなので、基本的に API 側で重複削除を防いでくれます。
+
 TOKEN には `WORKER_AUTH_TOKEN`（`Aiyg2x9ATjBRRS347qoRRjPaR9eGp7CHGi6tJDoi6Kk=`）を指定します。
 
 ## 4. 詳細 Worker の再ログイン仕様

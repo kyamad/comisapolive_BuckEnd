@@ -20,6 +20,15 @@ id = "faaeff9c9c194751bc1e20549fdb3161"
 binding = "IMAGES"
 bucket_name = "liver-images"
 
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "49596f0e6e73472aa48904f16a55ec46"
+
+[[d1_databases]]
+binding = "REVIEWS_DB"
+database_name = "liver-reviews-db"
+database_id = "d6629c6c-3a67-4538-beda-01d18b296af0"
+
 # 環境変数
 [vars]
 DETAIL_WORKER_URL = "https://liver-scraper-details.liver-scraper-detailsapi.workers.dev"
